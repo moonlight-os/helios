@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.13)
 # https://github.com/google/oss-policies-info/blob/main/foundational-cxx-support-matrix.md#foundational-c-support
 
-project(test_sunshine)
+project(test_helios)
 
 include_directories("${CMAKE_SOURCE_DIR}")
 

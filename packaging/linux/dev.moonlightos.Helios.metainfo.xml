@@ -28,11 +28,11 @@
       @PROJECT_LONG_DESCRIPTION@
     </p>
 
-    <p>NOTE: Sunshine requires additional installation steps (Flatpak).</p>
+    <p>NOTE: Helios requires additional installation steps (Flatpak).</p>
     <p>
       <code>flatpak run --command=additional-install.sh @PROJECT_FQDN@</code>
     </p>
-    <p>NOTE: Sunshine uses a self-signed certificate. The web browser will report it as not secure, but it is safe.</p>
+    <p>NOTE: Helios uses a self-signed certificate. The web browser will report it as not secure, but it is safe.</p>
     <p>NOTE: KMS Grab (Flatpak)</p>
     <p>
       <code>sudo -i PULSE_SERVER=unix:/run/user/$(id -u $whoami)/pulse/native flatpak run @PROJECT_FQDN@</code>
@@ -56,8 +56,8 @@
   </developer>
   <screenshots>
     <screenshot type="default">
-      <image>https://app.lizardbyte.dev/Sunshine/assets/img/screenshots/01-sunshine-welcome-page.png</image>
-      <caption>Sunshine welcome page</caption>
+      <image>https://app.lizardbyte.dev/Sunshine/assets/img/screenshots/01-helios-welcome-page.png</image>
+      <caption>Helios welcome page</caption>
     </screenshot>
   </screenshots>
   <content_rating type="oars-1.0">

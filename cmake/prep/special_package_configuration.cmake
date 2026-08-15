@@ -1,6 +1,6 @@
 if(UNIX)
     if(${SUNSHINE_CONFIGURE_HOMEBREW})
-        configure_file(packaging/sunshine.rb sunshine.rb @ONLY)
+        configure_file(packaging/helios.rb helios.rb @ONLY)
     endif()
 endif()
 
@@ -25,12 +25,12 @@ elseif(UNIX)
     configure_file(packaging/linux/${PROJECT_FQDN}.metainfo.xml ${PROJECT_FQDN}.metainfo.xml @ONLY)
 
     # configure service
-    configure_file(packaging/linux/sunshine.service.in sunshine.service @ONLY)
+    configure_file(packaging/linux/helios.service.in helios.service @ONLY)
 
     # configure the arch linux pkgbuild
     if(${SUNSHINE_CONFIGURE_PKGBUILD})
         configure_file(packaging/linux/Arch/PKGBUILD PKGBUILD @ONLY)
-        configure_file(packaging/linux/Arch/sunshine.install sunshine.install @ONLY)
+        configure_file(packaging/linux/Arch/helios.install helios.install @ONLY)
     endif()
 
     # configure the flatpak manifest

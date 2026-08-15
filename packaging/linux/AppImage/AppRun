@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# custom AppRun for Sunshine AppImage
+# custom AppRun for Helios AppImage
 
 # path of the extracted AppRun
 HERE="$(dirname "$(readlink -f "${0}")")"
-SUNSHINE_PATH=/usr/bin/sunshine
-SUNSHINE_BIN_HERE=$HERE/usr/bin/sunshine
-SUNSHINE_SHARE_HERE=$HERE/usr/share/sunshine
+SUNSHINE_PATH=/usr/bin/helios
+SUNSHINE_BIN_HERE=$HERE/usr/bin/helios
+SUNSHINE_SHARE_HERE=$HERE/usr/share/helios
 
 # Set APPDIR when running directly from the AppDir:
 if [ -z "$APPDIR" ]; then
@@ -18,46 +18,46 @@ cd "$HERE" || exit 1
 function help() {
 echo "
  ------------------------------
-   Sunshine AppImage package.
+   Helios AppImage package.
  ------------------------------
 
- sunshine.AppImage options
+ helios.AppImage options
  ------------------------
 
  Usage:  $ARGV0  --help, -h
  ------            # This message
 
          $ARGV0  --install, -i
-                   # Install input rules sunshine.service files. Restart required.
+                   # Install input rules helios.service files. Restart required.
 
          $ARGV0  --remove, -r
-                   # Remove input rules sunshine.service files.
+                   # Remove input rules helios.service files.
 
          $ARGV0  --appimage-help
                    # Show available AppImage options
 
- sunshine options
+ helios options
  ----------------
 "
-# print sunshine binary help, replacing the sunshine command in usage statement
+# print helios binary help, replacing the helios command in usage statement
 "$SUNSHINE_BIN_HERE" --help | sed -e "s#$SUNSHINE_BIN_HERE#$ARGV0#g"
 }
 
 function install() {
   # user input rules
   # shellcheck disable=SC2002
-  cat "$SUNSHINE_SHARE_HERE/udev/rules.d/60-sunshine.rules" | sudo tee /etc/udev/rules.d/60-sunshine.rules
-  cat "$SUNSHINE_SHARE_HERE/modules-load.d/60-sunshine.conf" | sudo tee /etc/modules-load.d/60-sunshine.conf
+  cat "$SUNSHINE_SHARE_HERE/udev/rules.d/60-helios.rules" | sudo tee /etc/udev/rules.d/60-helios.rules
+  cat "$SUNSHINE_SHARE_HERE/modules-load.d/60-helios.conf" | sudo tee /etc/modules-load.d/60-helios.conf
   sudo modprobe uhid
   sudo udevadm control --reload-rules
   sudo udevadm trigger --property-match=DEVNAME=/dev/uinput
   sudo udevadm trigger --property-match=DEVNAME=/dev/uhid
 
-  # sunshine service
+  # helios service
   mkdir -p ~/.config/systemd/user
   cp -r "$SUNSHINE_SHARE_HERE/systemd/user/" ~/.config/systemd/
   # patch service executable path
-  sed -i -e "s#$SUNSHINE_PATH#$(readlink -f $ARGV0)#g" ~/.config/systemd/user/sunshine.service
+  sed -i -e "s#$SUNSHINE_PATH#$(readlink -f $ARGV0)#g" ~/.config/systemd/user/helios.service
 
   # setcap
   sudo setcap cap_sys_admin+p "$(readlink -f "$SUNSHINE_BIN_HERE")"
@@ -65,13 +65,13 @@ function install() {
 
 function remove() {
   # remove input rules
-  sudo rm -f /etc/udev/rules.d/60-sunshine.rules
+  sudo rm -f /etc/udev/rules.d/60-helios.rules
 
   # remove uhid module loading config
-  sudo rm -f /etc/modules-load.d/60-sunshine.conf
+  sudo rm -f /etc/modules-load.d/60-helios.conf
 
   # remove service
-  sudo rm -f ~/.config/systemd/user/sunshine.service
+  sudo rm -f ~/.config/systemd/user/helios.service
 }
 
 # process arguments
@@ -92,7 +92,7 @@ fi
 
 # create config directory if it doesn't exist
 # https://github.com/LizardByte/Sunshine/issues/324
-mkdir -p ~/.config/sunshine
+mkdir -p ~/.config/helios
 
-# run sunshine
+# run helios
 "$SUNSHINE_BIN_HERE" $@
