@@ -129,7 +129,7 @@ Ensure [git](https://git-scm.com) is installed on your system, then clone the re
 
 ```bash
 git clone https://github.com/ClassicOldSong/Apollo.git --recurse-submodules
-cd Apollo
+cd Helios
 mkdir build
 ```
 

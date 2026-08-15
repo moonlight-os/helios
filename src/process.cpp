@@ -366,51 +366,51 @@ namespace proc {
     fps_str = fps_buf;
 
     // Add Stream-specific environment variables
-    // Sunshine Compatibility
+    // Helios Compatibility
     _env["SUNSHINE_APP_ID"] = _app.id;
     _env["SUNSHINE_APP_NAME"] = _app.name;
     _env["SUNSHINE_CLIENT_WIDTH"] = std::to_string(render_width);
     _env["SUNSHINE_CLIENT_HEIGHT"] = std::to_string(render_height);
-    _env["SUNSHINE_CLIENT_FPS"] = config::sunshine.envvar_compatibility_mode ? std::to_string(std::round((float)launch_session->fps / 1000.0f)) : fps_str;
+    _env["SUNSHINE_CLIENT_FPS"] = config::helios.envvar_compatibility_mode ? std::to_string(std::round((float)launch_session->fps / 1000.0f)) : fps_str;
     _env["SUNSHINE_CLIENT_HDR"] = launch_session->enable_hdr ? "true" : "false";
     _env["SUNSHINE_CLIENT_GCMAP"] = std::to_string(launch_session->gcmap);
     _env["SUNSHINE_CLIENT_HOST_AUDIO"] = launch_session->host_audio ? "true" : "false";
     _env["SUNSHINE_CLIENT_ENABLE_SOPS"] = launch_session->enable_sops ? "true" : "false";
 
-    _env["APOLLO_APP_ID"] = _app.id;
-    _env["APOLLO_APP_NAME"] = _app.name;
-    _env["APOLLO_APP_UUID"] = _app.uuid;
-    _env["APOLLO_APP_STATUS"] = "STARTING";
-    _env["APOLLO_CLIENT_UUID"] = launch_session->unique_id;
-    _env["APOLLO_CLIENT_NAME"] = launch_session->device_name;
-    _env["APOLLO_CLIENT_WIDTH"] = std::to_string(render_width);
-    _env["APOLLO_CLIENT_HEIGHT"] = std::to_string(render_height);
-    _env["APOLLO_CLIENT_RENDER_WIDTH"] = std::to_string(launch_session->width);
-    _env["APOLLO_CLIENT_RENDER_HEIGHT"] = std::to_string(launch_session->height);
-    _env["APOLLO_CLIENT_SCALE_FACTOR"] = std::to_string(scale_factor);
-    _env["APOLLO_CLIENT_FPS"] = fps_str;
-    _env["APOLLO_CLIENT_HDR"] = launch_session->enable_hdr ? "true" : "false";
-    _env["APOLLO_CLIENT_GCMAP"] = std::to_string(launch_session->gcmap);
-    _env["APOLLO_CLIENT_HOST_AUDIO"] = launch_session->host_audio ? "true" : "false";
-    _env["APOLLO_CLIENT_ENABLE_SOPS"] = launch_session->enable_sops ? "true" : "false";
+    _env["HELIOS_APP_ID"] = _app.id;
+    _env["HELIOS_APP_NAME"] = _app.name;
+    _env["HELIOS_APP_UUID"] = _app.uuid;
+    _env["HELIOS_APP_STATUS"] = "STARTING";
+    _env["HELIOS_CLIENT_UUID"] = launch_session->unique_id;
+    _env["HELIOS_CLIENT_NAME"] = launch_session->device_name;
+    _env["HELIOS_CLIENT_WIDTH"] = std::to_string(render_width);
+    _env["HELIOS_CLIENT_HEIGHT"] = std::to_string(render_height);
+    _env["HELIOS_CLIENT_RENDER_WIDTH"] = std::to_string(launch_session->width);
+    _env["HELIOS_CLIENT_RENDER_HEIGHT"] = std::to_string(launch_session->height);
+    _env["HELIOS_CLIENT_SCALE_FACTOR"] = std::to_string(scale_factor);
+    _env["HELIOS_CLIENT_FPS"] = fps_str;
+    _env["HELIOS_CLIENT_HDR"] = launch_session->enable_hdr ? "true" : "false";
+    _env["HELIOS_CLIENT_GCMAP"] = std::to_string(launch_session->gcmap);
+    _env["HELIOS_CLIENT_HOST_AUDIO"] = launch_session->host_audio ? "true" : "false";
+    _env["HELIOS_CLIENT_ENABLE_SOPS"] = launch_session->enable_sops ? "true" : "false";
 
     int channelCount = launch_session->surround_info & 65535;
     switch (channelCount) {
       case 2:
         _env["SUNSHINE_CLIENT_AUDIO_CONFIGURATION"] = "2.0";
-        _env["APOLLO_CLIENT_AUDIO_CONFIGURATION"] = "2.0";
+        _env["HELIOS_CLIENT_AUDIO_CONFIGURATION"] = "2.0";
         break;
       case 6:
         _env["SUNSHINE_CLIENT_AUDIO_CONFIGURATION"] = "5.1";
-        _env["APOLLO_CLIENT_AUDIO_CONFIGURATION"] = "5.1";
+        _env["HELIOS_CLIENT_AUDIO_CONFIGURATION"] = "5.1";
         break;
       case 8:
         _env["SUNSHINE_CLIENT_AUDIO_CONFIGURATION"] = "7.1";
-        _env["APOLLO_CLIENT_AUDIO_CONFIGURATION"] = "7.1";
+        _env["HELIOS_CLIENT_AUDIO_CONFIGURATION"] = "7.1";
         break;
     }
     _env["SUNSHINE_CLIENT_AUDIO_SURROUND_PARAMS"] = launch_session->surround_params;
-    _env["APOLLO_CLIENT_AUDIO_SURROUND_PARAMS"] = launch_session->surround_params;
+    _env["HELIOS_CLIENT_AUDIO_SURROUND_PARAMS"] = launch_session->surround_params;
 
     if (!_app.output.empty() && _app.output != "null"sv) {
 #ifdef _WIN32
@@ -448,7 +448,7 @@ namespace proc {
       if (ec) {
         BOOST_LOG(error) << "Couldn't run ["sv << cmd.do_cmd << "]: System: "sv << ec.message();
         // We don't want any prep commands failing launch of the desktop.
-        // This is to prevent the issue where users reboot their PC and need to log in with Sunshine.
+        // This is to prevent the issue where users reboot their PC and need to log in with Helios.
         // permission_denied is typically returned when the user impersonation fails, which can happen when user is not signed in yet.
         if (!(_app.cmd.empty() && ec == std::errc::permission_denied)) {
           return -1;
@@ -463,7 +463,7 @@ namespace proc {
       }
     }
 
-    _env["APOLLO_APP_STATUS"] = "RUNNING";
+    _env["HELIOS_APP_STATUS"] = "RUNNING";
 
     for (auto &cmd : _app.detached) {
       boost::filesystem::path working_dir = _app.working_dir.empty() ?
@@ -607,7 +607,7 @@ namespace proc {
     if (!_app.state_cmds.empty()) {
       auto exec_thread = std::thread([cmd_list = _app.state_cmds, app_working_dir = _app.working_dir, _env = _env]() mutable {
 
-        _env["APOLLO_APP_STATUS"] = "RESUMING";
+        _env["HELIOS_APP_STATUS"] = "RESUMING";
 
         std::error_code ec;
         auto _state_resume_it = std::begin(cmd_list);
@@ -661,7 +661,7 @@ namespace proc {
 
     if (!_app.state_cmds.empty()) {
       auto exec_thread = std::thread([cmd_list = _app.state_cmds, app_working_dir = _app.working_dir, _env = _env]() mutable {
-        _env["APOLLO_APP_STATUS"] = "PAUSING";
+        _env["HELIOS_APP_STATUS"] = "PAUSING";
 
         std::error_code ec;
         auto _state_pause_it = std::begin(cmd_list);
@@ -714,7 +714,7 @@ namespace proc {
     _process = boost::process::v1::child();
     _process_group = boost::process::v1::group();
 
-    _env["APOLLO_APP_STATUS"] = "TERMINATING";
+    _env["HELIOS_APP_STATUS"] = "TERMINATING";
 
     for (; _app_prep_it != _app_prep_begin; --_app_prep_it) {
       auto &cmd = *(_app_prep_it - 1);
@@ -1049,7 +1049,7 @@ namespace proc {
    * Additionally, empty keys (such as "prep-cmd" or "detached") and keys no longer needed ("launching", "index")
    * are removed from the input.
    *
-   * Legacy versions of Sunshine/Apollo stored boolean and integer values as strings.
+   * Legacy versions of Helios/Helios stored boolean and integer values as strings.
    * The following keys are converted:
    *   - Boolean keys: "exclude-global-prep-cmd", "elevated", "auto-detach", "wait-all",
    *                     "use-app-identity", "per-client-app-identity", "virtual-display"
@@ -1273,8 +1273,8 @@ namespace proc {
           std::vector<proc::cmd_t> prep_cmds;
           bool exclude_global_prep = app_node.value("exclude-global-prep-cmd", false);
           if (!exclude_global_prep) {
-            prep_cmds.reserve(config::sunshine.prep_cmds.size());
-            for (auto &prep_cmd : config::sunshine.prep_cmds) {
+            prep_cmds.reserve(config::helios.prep_cmds.size());
+            for (auto &prep_cmd : config::helios.prep_cmds) {
               auto do_cmd = parse_env_val(this_env, prep_cmd.do_cmd);
               auto undo_cmd = parse_env_val(this_env, prep_cmd.undo_cmd);
               prep_cmds.emplace_back(
@@ -1301,8 +1301,8 @@ namespace proc {
           std::vector<proc::cmd_t> state_cmds;
           bool exclude_global_state_cmds = app_node.value("exclude-global-state-cmd", false);
           if (!exclude_global_state_cmds) {
-            state_cmds.reserve(config::sunshine.state_cmds.size());
-            for (auto &state_cmd : config::sunshine.state_cmds) {
+            state_cmds.reserve(config::helios.state_cmds.size());
+            for (auto &state_cmd : config::helios.state_cmds) {
               auto do_cmd = parse_env_val(this_env, state_cmd.do_cmd);
               auto undo_cmd = parse_env_val(this_env, state_cmd.undo_cmd);
               state_cmds.emplace_back(

@@ -38,10 +38,10 @@ echo "using icon sizes:"
 # shellcheck disable=SC2068  # intentionally word split
 echo ${icon_sizes[@]}
 
-src_vectors=("../../src_assets/common/assets/web/public/images/apollo-locked.svg"
-             "../../src_assets/common/assets/web/public/images/apollo-pausing.svg"
-             "../../src_assets/common/assets/web/public/images/apollo-playing.svg"
-             "../../apollo.svg")
+src_vectors=("../../src_assets/common/assets/web/public/images/helios-locked.svg"
+             "../../src_assets/common/assets/web/public/images/helios-pausing.svg"
+             "../../src_assets/common/assets/web/public/images/helios-playing.svg"
+             "../../helios.svg")
 
 echo "using sources vectors:"
 # shellcheck disable=SC2068  # intentionally word split

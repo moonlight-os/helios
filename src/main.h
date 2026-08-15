@@ -1,6 +1,6 @@
 /**
  * @file src/main.h
- * @brief Declarations for the main entry point for Sunshine.
+ * @brief Declarations for the main entry point for Helios.
  */
 #pragma once
 
@@ -9,7 +9,7 @@
  * @param argc The number of arguments.
  * @param argv The arguments.
  * @examples
- * main(1, const char* args[] = {"sunshine", nullptr});
+ * main(1, const char* args[] = {"helios", nullptr});
  * @examples_end
  */
 int main(int argc, char *argv[]);

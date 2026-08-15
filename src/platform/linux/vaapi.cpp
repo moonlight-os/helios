@@ -14,7 +14,7 @@ extern "C" {
 #include <va/va.h>
 #include <va/va_drm.h>
 #if !VA_CHECK_VERSION(1, 9, 0)
-  // vaSyncBuffer stub allows Sunshine built against libva <2.9.0 to link against ffmpeg on libva 2.9.0 or later
+  // vaSyncBuffer stub allows Helios built against libva <2.9.0 to link against ffmpeg on libva 2.9.0 or later
   VAStatus
     vaSyncBuffer(
       VADisplay dpy,

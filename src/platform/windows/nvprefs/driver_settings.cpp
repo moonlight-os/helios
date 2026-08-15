@@ -11,7 +11,7 @@
 namespace {
 
   const auto sunshine_application_profile_name = L"SunshineStream";
-  const auto sunshine_application_path = L"sunshine.exe";
+  const auto sunshine_application_path = L"helios.exe";
 
   void nvapi_error_message(NvAPI_Status status) {
     NvAPI_ShortString message = {};
@@ -272,7 +272,7 @@ namespace nvprefs {
     if (!get_nvprefs_options().sunshine_high_power_mode) {
       if (status == NVAPI_OK &&
           setting.settingLocation == NVDRS_CURRENT_PROFILE_LOCATION) {
-        // User requested to not use high power mode for sunshine.exe,
+        // User requested to not use high power mode for helios.exe,
         // remove the setting from application profile if it's been set previously
 
         status = NvAPI_DRS_DeleteProfileSetting(session_handle, profile_handle, PREFERRED_PSTATE_ID);

@@ -1,6 +1,6 @@
 /**
  * @file src/config.h
- * @brief Declarations for the configuration of Sunshine.
+ * @brief Declarations for the configuration of Helios.
  */
 #pragma once
 
@@ -295,7 +295,7 @@ namespace config {
   extern stream_t stream;
   extern nvhttp_t nvhttp;
   extern input_t input;
-  extern sunshine_t sunshine;
+  extern sunshine_t helios;
 
   int parse(int argc, char *argv[]);
   std::unordered_map<std::string, std::string> parse_config(const std::string_view &file_content);

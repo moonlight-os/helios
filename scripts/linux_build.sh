@@ -90,7 +90,7 @@ Options:
   --publisher-name         The name of the publisher (not developer) of the application.
   --publisher-website      The URL of the publisher's website.
   --publisher-issue-url    The URL of the publisher's support site or issue tracker.
-                           If you provide a modified version of Sunshine, we kindly request that you use your own url.
+                           If you provide a modified version of Helios, we kindly request that you use your own url.
   --skip-cleanup           Do not restore the original gcc alternatives, or the math-vector.h file.
   --skip-cuda              Skip CUDA installation.
   --skip-libva             Skip libva installation. This will automatically be enabled if passing --appimage-build.

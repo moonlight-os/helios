@@ -75,17 +75,17 @@ namespace upnp {
       auto wm_http = std::to_string(net::map_port(confighttp::PORT_HTTPS));
 
       mappings.assign({
-        {{rtsp, rtsp, "TCP"s}, "Sunshine - RTSP"s},
-        {{video, video, "UDP"s}, "Sunshine - Video"s},
-        {{audio, audio, "UDP"s}, "Sunshine - Audio"s},
-        {{control, control, "UDP"s}, "Sunshine - Control"s},
-        {{gs_http, gs_http, "TCP"s}, "Sunshine - Client HTTP"s},
-        {{gs_https, gs_https, "TCP"s}, "Sunshine - Client HTTPS"s},
+        {{rtsp, rtsp, "TCP"s}, "Helios - RTSP"s},
+        {{video, video, "UDP"s}, "Helios - Video"s},
+        {{audio, audio, "UDP"s}, "Helios - Audio"s},
+        {{control, control, "UDP"s}, "Helios - Control"s},
+        {{gs_http, gs_http, "TCP"s}, "Helios - Client HTTP"s},
+        {{gs_https, gs_https, "TCP"s}, "Helios - Client HTTPS"s},
       });
 
       // Only map port for the Web Manager if it is configured to accept connection from WAN
       if (net::from_enum_string(config::nvhttp.origin_web_ui_allowed) > net::LAN) {
-        mappings.emplace_back(mapping_t {{wm_http, wm_http, "TCP"s}, "Sunshine - Web UI"s});
+        mappings.emplace_back(mapping_t {{wm_http, wm_http, "TCP"s}, "Helios - Web UI"s});
       }
 
       // Start the mapping thread
@@ -304,7 +304,7 @@ namespace upnp {
       bool mapped = false;
       IGDdatas data;
       urls_t mapped_urls;
-      auto address_family = net::af_from_enum_string(config::sunshine.address_family);
+      auto address_family = net::af_from_enum_string(config::helios.address_family);
 
       // Refresh UPnP rules every few minutes. They can be lost if the router reboots,
       // WAN IP address changes, or various other conditions.
@@ -367,7 +367,7 @@ namespace upnp {
   };
 
   std::unique_ptr<platf::deinit_t> start() {
-    if (!config::sunshine.flags[config::flag::UPNP]) {
+    if (!config::helios.flags[config::flag::UPNP]) {
       return nullptr;
     }
 

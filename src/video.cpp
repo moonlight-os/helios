@@ -751,7 +751,7 @@ namespace video {
         {"async_depth"s, 1},
         {"skip_frame"s, 0},
         {"log_to_dbg"s, []() {
-           return config::sunshine.min_log_level < 2 ? 1 : 0;
+           return config::helios.min_log_level < 2 ? 1 : 0;
          }},
         {"preencode"s, &config::video.amd.amd_preanalysis},
         {"quality"s, &config::video.amd.amd_quality_av1},
@@ -775,7 +775,7 @@ namespace video {
         {"async_depth"s, 1},
         {"skip_frame"s, 0},
         {"log_to_dbg"s, []() {
-           return config::sunshine.min_log_level < 2 ? 1 : 0;
+           return config::helios.min_log_level < 2 ? 1 : 0;
          }},
         {"gops_per_idr"s, 1},
         {"header_insertion_mode"s, "idr"s},
@@ -814,7 +814,7 @@ namespace video {
         {"async_depth"s, 1},
         {"frame_skipping"s, 0},
         {"log_to_dbg"s, []() {
-           return config::sunshine.min_log_level < 2 ? 1 : 0;
+           return config::helios.min_log_level < 2 ? 1 : 0;
          }},
         {"preencode"s, &config::video.amd.amd_preanalysis},
         {"quality"s, &config::video.amd.amd_quality_h264},
@@ -1928,7 +1928,7 @@ namespace video {
     // This will move expensive processing off the encoder thread to allow us
     // to restart encoding as soon as possible. For cases where the NVENC driver
     // hang occurs, this thread may probably never exit, but it will allow
-    // streaming to continue without requiring a full restart of Sunshine.
+    // streaming to continue without requiring a full restart of Helios.
     auto fail_guard = util::fail_guard([&encoder, &session] {
       if (encoder.flags & ASYNC_TEARDOWN) {
         std::thread encoder_teardown_thread {[session = std::move(session)]() mutable {
@@ -1989,7 +1989,7 @@ namespace video {
     while (true) {
       // Break out of the encoding loop if any of the following are true:
       // a) The stream is ending
-      // b) Sunshine is quitting
+      // b) Helios is quitting
       // c) The capture side is waiting to reinit and we've encoded at least one frame
       //
       // If we have to reinit before we have received any captured frames, we will encode
@@ -2700,8 +2700,8 @@ namespace video {
       test_hdr_and_yuv444(encoder.av1, 2);
     }
 
-    encoder.h264[encoder_t::VUI_PARAMETERS] = encoder.h264[encoder_t::VUI_PARAMETERS] && !config::sunshine.flags[config::flag::FORCE_VIDEO_HEADER_REPLACE];
-    encoder.hevc[encoder_t::VUI_PARAMETERS] = encoder.hevc[encoder_t::VUI_PARAMETERS] && !config::sunshine.flags[config::flag::FORCE_VIDEO_HEADER_REPLACE];
+    encoder.h264[encoder_t::VUI_PARAMETERS] = encoder.h264[encoder_t::VUI_PARAMETERS] && !config::helios.flags[config::flag::FORCE_VIDEO_HEADER_REPLACE];
+    encoder.hevc[encoder_t::VUI_PARAMETERS] = encoder.hevc[encoder_t::VUI_PARAMETERS] && !config::helios.flags[config::flag::FORCE_VIDEO_HEADER_REPLACE];
 
     if (!encoder.h264[encoder_t::VUI_PARAMETERS]) {
       BOOST_LOG(warning) << encoder.name << ": h264 missing sps->vui parameters"sv;

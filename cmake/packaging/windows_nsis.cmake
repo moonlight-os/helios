@@ -75,7 +75,7 @@ set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL "ON")
 # set(CPACK_NSIS_CONTACT "${CMAKE_PROJECT_HOMEPAGE_URL}/support")
 
 # set(CPACK_NSIS_MENU_LINKS
-#         "https://docs.lizardbyte.dev/projects/sunshine" "Sunshine documentation"
+#         "https://docs.lizardbyte.dev/projects/sunshine" "Helios documentation"
 #         "https://app.lizardbyte.dev" "LizardByte Web Site"
 #         "https://app.lizardbyte.dev/support" "LizardByte Support")
 set(CPACK_NSIS_MANIFEST_DPI_AWARE true)

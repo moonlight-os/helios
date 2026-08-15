@@ -12,7 +12,7 @@ import datetime
 import os
 import subprocess
 
-project_name = 'Sunshine'
+project_name = 'Helios'
 project_owner = 'LizardByte'
 
 script_dir = os.path.dirname(os.path.abspath(__file__))

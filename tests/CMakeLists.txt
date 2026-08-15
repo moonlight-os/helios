@@ -35,7 +35,7 @@ endif ()
 
 set(TEST_DEFINITIONS)  # list will be appended as needed
 
-# this indicates we're building tests in case sunshine needs to adjust some code or add private tests
+# this indicates we're building tests in case helios needs to adjust some code or add private tests
 list(APPEND TEST_DEFINITIONS SUNSHINE_TESTS)
 list(APPEND TEST_DEFINITIONS SUNSHINE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 list(APPEND TEST_DEFINITIONS SUNSHINE_TEST_BIN_DIR="${CMAKE_CURRENT_BINARY_DIR}")
@@ -71,7 +71,7 @@ set(INTEGRATION_TEST_FILES
     "docs/configuration.md"
     "src_assets/common/assets/web/public/assets/locale/en.json"
     "src_assets/common/assets/web/configs/tabs/General.vue"
-    "src_assets/linux/misc/60-sunshine.rules"
+    "src_assets/linux/misc/60-helios.rules"
 )
 
 foreach(file ${INTEGRATION_TEST_FILES})
@@ -95,7 +95,7 @@ add_custom_target(sync_locale_files ALL
 )
 
 foreach(dep ${SUNSHINE_TARGET_DEPENDENCIES})
-    add_dependencies(${PROJECT_NAME} ${dep})  # compile these before sunshine
+    add_dependencies(${PROJECT_NAME} ${dep})  # compile these before helios
 endforeach()
 
 # Ensure locale files are synchronized before building the test executable

@@ -40,7 +40,7 @@ namespace args {
       help(name);
     }
 
-    http::save_user_creds(config::sunshine.credentials_file, argv[0], argv[1]);
+    http::save_user_creds(config::helios.credentials_file, argv[0], argv[1]);
 
     return 0;
   }
@@ -137,7 +137,7 @@ namespace service_ctrl {
         return;
       }
 
-      service_handle = OpenServiceA(scm_handle, "ApolloService", service_desired_access);
+      service_handle = OpenServiceA(scm_handle, "HeliosService", service_desired_access);
       if (!service_handle) {
         auto winerr = GetLastError();
         BOOST_LOG(error) << "OpenService() failed: "sv << winerr;
@@ -156,7 +156,7 @@ namespace service_ctrl {
     }
 
     /**
-     * @brief Asynchronously starts the Sunshine service.
+     * @brief Asynchronously starts the Helios service.
      */
     bool start_service() {
       if (!service_handle) {
@@ -211,7 +211,7 @@ namespace service_ctrl {
   bool start_service() {
     service_controller sc {SERVICE_QUERY_STATUS | SERVICE_START};
 
-    std::cout << "Starting Sunshine..."sv;
+    std::cout << "Starting Helios..."sv;
 
     // This operation is asynchronous, so we must wait for it to complete
     if (!sc.start_service()) {

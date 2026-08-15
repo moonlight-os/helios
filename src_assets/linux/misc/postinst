@@ -8,14 +8,14 @@ modprobe uhid
 if [ ! -x "$(command -v rpm-ostree)" ]; then
   echo "Not in an rpm-ostree environment, proceeding with post install steps."
 
-  # Ensure Sunshine can grab images from KMS
+  # Ensure Helios can grab images from KMS
   path_to_setcap=$(which setcap)
-  path_to_sunshine=$(readlink -f "$(which sunshine)")
+  path_to_sunshine=$(readlink -f "$(which helios)")
   if [ -x "$path_to_setcap" ] ; then
-    echo "Setting CAP_SYS_ADMIN capability on Sunshine binary."
+    echo "Setting CAP_SYS_ADMIN capability on Helios binary."
     echo "$path_to_setcap cap_sys_admin+p $path_to_sunshine"
     $path_to_setcap cap_sys_admin+p $path_to_sunshine
-    echo "CAP_SYS_ADMIN capability set on Sunshine binary."
+    echo "CAP_SYS_ADMIN capability set on Helios binary."
   else
     echo "error: setcap not found or not executable."
   fi

@@ -26,7 +26,7 @@ if(${SUNSHINE_ENABLE_CUDA})
             list(APPEND CMAKE_CUDA_ARCHITECTURES 75 80 86 87 89 90)
         else()
             message(FATAL_ERROR
-                    "Sunshine requires a minimum CUDA Compiler version of 12.0.
+                    "Helios requires a minimum CUDA Compiler version of 12.0.
                     Found version: ${CMAKE_CUDA_COMPILER_VERSION}"
             )
         endif()
@@ -99,7 +99,7 @@ if(LIBDRM_FOUND AND LIBCAP_FOUND)
 endif()
 
 # evdev
-include(dependencies/libevdev_Sunshine)
+include(dependencies/libevdev_Helios)
 
 # vaapi
 if(${SUNSHINE_ENABLE_VAAPI})

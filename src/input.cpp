@@ -145,9 +145,9 @@ namespace input {
     int id;
 
     // When emulating the HOME button, we may need to artificially release the back button.
-    // Afterwards, the gamepad state on sunshine won't match the state on Moonlight.
-    // To prevent Sunshine from sending erroneous input data to the active application,
-    // Sunshine forces the button to be in a specific state until the gamepad state matches that of
+    // Afterwards, the gamepad state on helios won't match the state on Moonlight.
+    // To prevent Helios from sending erroneous input data to the active application,
+    // Helios forces the button to be in a specific state until the gamepad state matches that of
     // Moonlight once more.
     button_state_e back_button_state;
   };
@@ -573,10 +573,10 @@ namespace input {
     /**
      * When Moonlight sends mouse input through absolute coordinates,
      * it's possible that BUTTON_RIGHT is pressed down immediately after releasing BUTTON_LEFT.
-     * As a result, Sunshine will left-click on hyperlinks in the browser before right-clicking
+     * As a result, Helios will left-click on hyperlinks in the browser before right-clicking
      *
      * This can be solved by delaying BUTTON_LEFT, however, any delay on input is undesirable during gaming
-     * As a compromise, Sunshine will only put delays on BUTTON_LEFT when
+     * As a compromise, Helios will only put delays on BUTTON_LEFT when
      * absolute mouse coordinates have been sent.
      *
      * Try to make sure BUTTON_RIGHT gets called before BUTTON_LEFT is released.

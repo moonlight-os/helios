@@ -56,7 +56,7 @@ export default defineConfig({
         // The Codecov vite plugin should be after all other plugins
         codecovVitePlugin({
             enableBundleAnalysis: process.env.CODECOV_TOKEN !== undefined,
-            bundleName: "sunshine",
+            bundleName: "helios",
             uploadToken: process.env.CODECOV_TOKEN,
         }),
     ],

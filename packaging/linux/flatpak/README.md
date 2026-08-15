@@ -13,10 +13,10 @@
 
 Helios is a self-hosted game stream host for Moonlight.
 
-LizardByte has the full documentation hosted on [Read the Docs](https://docs.lizardbyte.dev/projects/sunshine)
+LizardByte has the full documentation hosted on [Read the Docs](https://docs.lizardbyte.dev/projects/helios)
 
-* [Stable](https://docs.lizardbyte.dev/projects/sunshine/latest/)
-* [Beta](https://docs.lizardbyte.dev/projects/sunshine/master/)
+* [Stable](https://docs.lizardbyte.dev/projects/helios/latest/)
+* [Beta](https://docs.lizardbyte.dev/projects/helios/master/)
 
-This repo is synced from the upstream [Helios](https://github.com/LizardByte/Sunshine) repo.
+This repo is synced from the upstream [Helios](https://github.com/LizardByte/Helios) repo.
 Please report issues and contribute to the upstream repo.

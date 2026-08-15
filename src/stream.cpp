@@ -72,13 +72,13 @@ static const short packetTypes[] = {
   0x0302,  // IDR frame
   0x0001,  // fully encrypted
   0x010e,  // HDR mode
-  0x5500,  // Rumble triggers (Sunshine protocol extension)
-  0x5501,  // Set motion event (Sunshine protocol extension)
-  0x5502,  // Set RGB LED (Sunshine protocol extension)
-  0x3000,  // Execute Server Command (Apollo protocol extension)
-  0x3001,  // Set Clipboard (Apollo protocol extension)
-  0x3002,  // File transfer nonce request (Apollo protocol extension)
-  0x5503,  // Set Adaptive triggers (Sunshine protocol extension)
+  0x5500,  // Rumble triggers (Helios protocol extension)
+  0x5501,  // Set motion event (Helios protocol extension)
+  0x5502,  // Set RGB LED (Helios protocol extension)
+  0x3000,  // Execute Server Command (Helios protocol extension)
+  0x3001,  // Set Clipboard (Helios protocol extension)
+  0x3002,  // File transfer nonce request (Helios protocol extension)
+  0x5503,  // Set Adaptive triggers (Helios protocol extension)
 };
 
 namespace asio = boost::asio;
@@ -105,7 +105,7 @@ namespace stream {
 
     std::uint8_t headerType;  // Always 0x01 for short headers
 
-    // Sunshine extension
+    // Helios extension
     // Frame processing latency, in 1/10 ms units
     //     zero when the frame is repeated or there is no backend implementation
     boost::endian::little_uint16_at frame_processing_latency;
@@ -118,7 +118,7 @@ namespace stream {
     std::uint8_t frameType;
 
     // Length of the final packet payload for codecs that cannot handle
-    // zero padding, such as AV1 (Sunshine extension).
+    // zero padding, such as AV1 (Helios extension).
     boost::endian::little_uint16_at lastPayloadLen;
 
     std::uint8_t unknown[2];
@@ -220,7 +220,7 @@ namespace stream {
 
     std::uint8_t enabled;
 
-    // Sunshine protocol extension
+    // Helios protocol extension
     SS_HDR_METADATA metadata;
   };
 
@@ -1016,8 +1016,8 @@ namespace stream {
 
       uint8_t cmdIndex = *(uint8_t*)payload.data();
 
-      if (cmdIndex < config::sunshine.server_cmds.size()) {
-        const auto& cmd = config::sunshine.server_cmds[cmdIndex];
+      if (cmdIndex < config::helios.server_cmds.size()) {
+        const auto& cmd = config::helios.server_cmds[cmdIndex];
         BOOST_LOG(info) << "Executing server command: " << cmd.cmd_name;
 
         auto exec_thread = std::thread([&cmd]{
@@ -1758,7 +1758,7 @@ namespace stream {
   }
 
   int start_broadcast(broadcast_ctx_t &ctx) {
-    auto address_family = net::af_from_enum_string(config::sunshine.address_family);
+    auto address_family = net::af_from_enum_string(config::helios.address_family);
     auto protocol = address_family == net::IPV4 ? udp::v4() : udp::v6();
     auto control_port = net::map_port(CONTROL_PORT);
     auto video_port = net::map_port(VIDEO_STREAM_PORT);
@@ -2030,7 +2030,7 @@ namespace stream {
     void join(session_t &session) {
       // Current Nvidia drivers have a bug where NVENC can deadlock the encoder thread with hardware-accelerated
       // GPU scheduling enabled. If this happens, we will terminate ourselves and the service can restart.
-      // The alternative is that Sunshine can never start another session until it's manually restarted.
+      // The alternative is that Helios can never start another session until it's manually restarted.
       auto task = []() {
         BOOST_LOG(fatal) << "Hang detected! Session failed to terminate in 10 seconds."sv;
         logging::log_flush();

@@ -32,7 +32,7 @@ namespace args {
    * @param argc The number of arguments.
    * @param argv The arguments.
    * @examples
-   * creds("sunshine", 2, {"new_username", "new_password"});
+   * creds("helios", 2, {"new_username", "new_password"});
    * @examples_end
    */
   int creds(const char *name, int argc, char *argv[]);
@@ -41,7 +41,7 @@ namespace args {
    * @brief Print help to stdout, then exit.
    * @param name The name of the program.
    * @examples
-   * help("sunshine");
+   * help("helios");
    * @examples_end
    */
   int help(const char *name);
@@ -57,9 +57,9 @@ namespace args {
 #ifdef _WIN32
   /**
    * @brief Restore global NVIDIA control panel settings.
-   * If Sunshine was improperly terminated, this function restores
+   * If Helios was improperly terminated, this function restores
    * the global NVIDIA control panel settings to the undo file left
-   * by Sunshine. This function is typically called by the uninstaller.
+   * by Helios. This function is typically called by the uninstaller.
    * @examples
    * restore_nvprefs_undo();
    * @examples_end
@@ -69,21 +69,21 @@ namespace args {
 }  // namespace args
 
 /**
- * @brief Functions for handling the lifetime of Sunshine.
+ * @brief Functions for handling the lifetime of Helios.
  */
 namespace lifetime {
   extern char **argv;
   extern std::atomic_int desired_exit_code;
 
   /**
-   * @brief Terminates Sunshine gracefully with the provided exit code.
+   * @brief Terminates Helios gracefully with the provided exit code.
    * @param exit_code The exit code to return from main().
    * @param async Specifies whether our termination will be non-blocking.
    */
   void exit_sunshine(int exit_code, bool async);
 
   /**
-   * @brief Breaks into the debugger or terminates Sunshine if no debugger is attached.
+   * @brief Breaks into the debugger or terminates Helios if no debugger is attached.
    */
   void debug_trap();
 
@@ -106,7 +106,7 @@ void log_publisher_data();
 bool is_gamestream_enabled();
 
 /**
- * @brief Namespace for controlling the Sunshine service model on Windows.
+ * @brief Namespace for controlling the Helios service model on Windows.
  */
 namespace service_ctrl {
   /**
@@ -126,7 +126,7 @@ namespace service_ctrl {
   bool start_service();
 
   /**
-   * @brief Wait for the UI to be ready after Sunshine startup.
+   * @brief Wait for the UI to be ready after Helios startup.
    * @examples
    * wait_for_ui_ready();
    * @examples_end

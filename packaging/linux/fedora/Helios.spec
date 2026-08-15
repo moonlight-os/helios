@@ -255,8 +255,8 @@ fi
 %{_datadir}/applications/*.desktop
 
 # Icons
-%{_datadir}/icons/hicolor/scalable/apps/apollo.svg
-%{_datadir}/icons/hicolor/scalable/status/apollo*.svg
+%{_datadir}/icons/hicolor/scalable/apps/helios.svg
+%{_datadir}/icons/hicolor/scalable/status/helios*.svg
 
 # Metainfo
 %{_datadir}/metainfo/*.metainfo.xml

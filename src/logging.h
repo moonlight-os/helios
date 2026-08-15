@@ -51,7 +51,7 @@ namespace logging {
    * @param log_file The log file to write to.
    * @return An object that will deinitialize the logging system when it goes out of scope.
    * @examples
-   * log_init(2, "sunshine.log");
+   * log_init(2, "helios.log");
    * @examples_end
    */
   [[nodiscard]] std::unique_ptr<deinit_t> init(int min_log_level, const std::string &log_file);
@@ -80,7 +80,7 @@ namespace logging {
    * @brief Print help to stdout.
    * @param name The name of the program.
    * @examples
-   * print_help("sunshine");
+   * print_help("helios");
    * @examples_end
    */
   void print_help(const char *name);
@@ -106,7 +106,7 @@ namespace logging {
         message(message),
         units(units),
         interval(interval_in_seconds),
-        enabled(config::sunshine.min_log_level <= severity.default_severity()) {
+        enabled(config::helios.min_log_level <= severity.default_severity()) {
     }
 
     void collect_and_log(const T &value) {
