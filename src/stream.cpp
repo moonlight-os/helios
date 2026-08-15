@@ -15,6 +15,11 @@
 extern "C" {
   // clang-format off
 #include <moonlight-common-c/src/Limelight-internal.h>
+// nanors rs.h must precede rswrapper.h, whose macros would otherwise rewrite
+// the real prototypes. It used to arrive transitively via RtpAudioQueue.h, but
+// upstream moonlight-common-c replaced that include with a forward declaration,
+// so we pull in the complete type (and DATA_SHARDS_MAX) ourselves.
+#include <rs.h>
 #include "rswrapper.h"
   // clang-format on
 }
