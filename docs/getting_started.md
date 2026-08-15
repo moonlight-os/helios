@@ -210,7 +210,7 @@ Using this package requires that you have [Flatpak](https://flatpak.org/setup) i
 ##### Install (system level)
 **Flathub**
 ```bash
-flatpak install --system flathub dev.lizardbyte.app.Sunshine
+flatpak install --system flathub dev.moonlightos.Helios
 ```
 
 **Local**
@@ -221,7 +221,7 @@ flatpak install --system ./sunshine_{arch}.flatpak
 ##### Install (user level)
 **Flathub**
 ```bash
-flatpak install --user flathub dev.lizardbyte.app.Sunshine
+flatpak install --user flathub dev.moonlightos.Helios
 ```
 
 **Local**
@@ -231,23 +231,23 @@ flatpak install --user ./sunshine_{arch}.flatpak
 
 ##### Additional installation (required)
 ```bash
-flatpak run --command=additional-install.sh dev.lizardbyte.app.Sunshine
+flatpak run --command=additional-install.sh dev.moonlightos.Helios
 ```
 
 ##### Run with NVFBC capture (X11 Only)
 ```bash
-flatpak run dev.lizardbyte.app.Sunshine
+flatpak run dev.moonlightos.Helios
 ```
 
 ##### Run with KMS capture (Wayland & X11)
 ```bash
-sudo -i PULSE_SERVER=unix:/run/user/$(id -u $whoami)/pulse/native flatpak run dev.lizardbyte.app.Sunshine
+sudo -i PULSE_SERVER=unix:/run/user/$(id -u $whoami)/pulse/native flatpak run dev.moonlightos.Helios
 ```
 
 ##### Uninstall
 ```bash
-flatpak run --command=remove-additional-install.sh dev.lizardbyte.app.Sunshine
-flatpak uninstall --delete-data dev.lizardbyte.app.Sunshine
+flatpak run --command=remove-additional-install.sh dev.moonlightos.Helios
+flatpak uninstall --delete-data dev.moonlightos.Helios
 ```
 
 #### Homebrew
@@ -488,7 +488,7 @@ To get a list of available arguments, run the following command.
       ./sunshine.AppImage --help
       ```}
    @tab{ Flatpak | ```bash
-      flatpak run --command=sunshine dev.lizardbyte.app.Sunshine --help
+      flatpak run --command=sunshine dev.moonlightos.Helios --help
       ```}
 }
 

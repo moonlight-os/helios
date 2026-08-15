@@ -15,7 +15,7 @@ If you forgot your credentials to the web UI, try this.
     ```
   }
   @tab{Flatpak | ```bash
-    flatpak run --command=sunshine dev.lizardbyte.app.Sunshine --creds {new-username} {new-password}
+    flatpak run --command=sunshine dev.moonlightos.Helios --creds {new-username} {new-password}
     ```
   }
 }
