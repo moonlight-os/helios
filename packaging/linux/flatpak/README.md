@@ -5,8 +5,8 @@
 </div>
 
 <div align="center">
-  <a href="https://flathub.org/apps/dev.moonlightos.Helios"><img src="https://img.shields.io/flathub/downloads/dev.moonlightos.Helios?style=for-the-badge&logo=flathub" alt="Flathub installs"></a>
-  <a href="https://flathub.org/apps/dev.moonlightos.Helios"><img src="https://img.shields.io/flathub/v/dev.moonlightos.Helios?style=for-the-badge&logo=flathub" alt="Flathub Version"></a>
+  <a href="https://flathub.org/apps/dev.mopigames.Helios"><img src="https://img.shields.io/flathub/downloads/dev.mopigames.Helios?style=for-the-badge&logo=flathub" alt="Flathub installs"></a>
+  <a href="https://flathub.org/apps/dev.mopigames.Helios"><img src="https://img.shields.io/flathub/v/dev.mopigames.Helios?style=for-the-badge&logo=flathub" alt="Flathub Version"></a>
 </div>
 
 ## ℹ️ About

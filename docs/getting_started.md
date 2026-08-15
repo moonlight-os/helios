@@ -210,7 +210,7 @@ Using this package requires that you have [Flatpak](https://flatpak.org/setup) i
 ##### Install (system level)
 **Flathub**
 ```bash
-flatpak install --system flathub dev.moonlightos.Helios
+flatpak install --system flathub dev.mopigames.Helios
 ```
 
 **Local**
@@ -221,7 +221,7 @@ flatpak install --system ./helios_{arch}.flatpak
 ##### Install (user level)
 **Flathub**
 ```bash
-flatpak install --user flathub dev.moonlightos.Helios
+flatpak install --user flathub dev.mopigames.Helios
 ```
 
 **Local**
@@ -231,23 +231,23 @@ flatpak install --user ./helios_{arch}.flatpak
 
 ##### Additional installation (required)
 ```bash
-flatpak run --command=additional-install.sh dev.moonlightos.Helios
+flatpak run --command=additional-install.sh dev.mopigames.Helios
 ```
 
 ##### Run with NVFBC capture (X11 Only)
 ```bash
-flatpak run dev.moonlightos.Helios
+flatpak run dev.mopigames.Helios
 ```
 
 ##### Run with KMS capture (Wayland & X11)
 ```bash
-sudo -i PULSE_SERVER=unix:/run/user/$(id -u $whoami)/pulse/native flatpak run dev.moonlightos.Helios
+sudo -i PULSE_SERVER=unix:/run/user/$(id -u $whoami)/pulse/native flatpak run dev.mopigames.Helios
 ```
 
 ##### Uninstall
 ```bash
-flatpak run --command=remove-additional-install.sh dev.moonlightos.Helios
-flatpak uninstall --delete-data dev.moonlightos.Helios
+flatpak run --command=remove-additional-install.sh dev.mopigames.Helios
+flatpak uninstall --delete-data dev.mopigames.Helios
 ```
 
 #### Homebrew
@@ -488,7 +488,7 @@ To get a list of available arguments, run the following command.
       ./helios.AppImage --help
       ```}
    @tab{ Flatpak | ```bash
-      flatpak run --command=helios dev.moonlightos.Helios --help
+      flatpak run --command=helios dev.mopigames.Helios --help
       ```}
 }
 

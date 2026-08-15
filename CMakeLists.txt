@@ -6,11 +6,11 @@ cmake_minimum_required(VERSION 3.20)
 
 project(Helios VERSION 0.0.0
         DESCRIPTION "Game stream host for Selene and Moonlight OS"
-        HOMEPAGE_URL "https://github.com/mopi/helios")
+        HOMEPAGE_URL "https://github.com/MopigamesYT/helios")
 
 set(PROJECT_LICENSE "GPL-3.0-only")
 
-set(PROJECT_FQDN "dev.moonlightos.Helios")
+set(PROJECT_FQDN "dev.mopigames.Helios")
 
 set(PROJECT_BRIEF_DESCRIPTION "Game stream host for Selene")  # must be <= 35 characters
 

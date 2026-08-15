@@ -590,11 +590,11 @@ function run_step_validation() {
   echo "Running step: Validation"
 
   # Run appstream validation, etc.
-  appstreamcli validate "build/dev.moonlightos.Helios.metainfo.xml"
-  appstream-util validate "build/dev.moonlightos.Helios.metainfo.xml"
-  desktop-file-validate "build/dev.moonlightos.Helios.desktop"
+  appstreamcli validate "build/dev.mopigames.Helios.metainfo.xml"
+  appstream-util validate "build/dev.mopigames.Helios.metainfo.xml"
+  desktop-file-validate "build/dev.mopigames.Helios.desktop"
   if [ "$appimage_build" == 0 ]; then
-    desktop-file-validate "build/dev.moonlightos.Helios.terminal.desktop"
+    desktop-file-validate "build/dev.mopigames.Helios.terminal.desktop"
   fi
 }
 

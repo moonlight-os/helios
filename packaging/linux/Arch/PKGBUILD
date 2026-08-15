@@ -147,10 +147,10 @@ build() {
 
     cmake "${_cmake_options[@]}"
 
-    appstreamcli validate "build/dev.moonlightos.Helios.metainfo.xml"
-    appstream-util validate "build/dev.moonlightos.Helios.metainfo.xml"
-    desktop-file-validate "build/dev.moonlightos.Helios.desktop"
-    desktop-file-validate "build/dev.moonlightos.Helios.terminal.desktop"
+    appstreamcli validate "build/dev.mopigames.Helios.metainfo.xml"
+    appstream-util validate "build/dev.mopigames.Helios.metainfo.xml"
+    desktop-file-validate "build/dev.mopigames.Helios.desktop"
+    desktop-file-validate "build/dev.mopigames.Helios.terminal.desktop"
 
     make -C build
 }
