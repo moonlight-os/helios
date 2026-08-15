@@ -39,6 +39,8 @@
 
 # build directories
 build/
+# any out-of-tree cmake build dir, e.g. build-tests/ for BUILD_TESTS=ON
+build-*/
 cmake-*/
 docs/doxyconfig*
 

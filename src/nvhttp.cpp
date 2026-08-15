@@ -636,8 +636,14 @@ namespace nvhttp {
       named_cert_p->allow_client_commands = true;
       named_cert_p->always_use_virtual_display = false;
 
-      auto it = map_id_sess.find(client.uniqueID);
-      map_id_sess.erase(it);
+      // find() may return end() -- erasing that is undefined behaviour and
+      // segfaults. The HTTP pairing flow always has an entry here, but any
+      // caller reaching this phase without one (a unit test calling the phase
+      // functions directly, or a session already removed) would take the host
+      // down with it.
+      if (auto it = map_id_sess.find(client.uniqueID); it != std::end(map_id_sess)) {
+        map_id_sess.erase(it);
+      }
 
       add_authorized_client(named_cert_p);
     } else {
