@@ -64,5 +64,5 @@
 	branch = master
 [submodule "third-party/moonlight-common-c"]
 	path = third-party/moonlight-common-c
-	url = /home/mopi/moonlight-os-stuff/lunaris
+	url = https://github.com/moonlight-os/lunaris.git
 	branch = main
