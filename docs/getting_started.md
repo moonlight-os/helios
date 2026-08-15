@@ -1,6 +1,6 @@
 # Getting Started
 
-The recommended method for running Sunshine is to use the [binaries](#binaries) included in the
+The recommended method for running Helios is to use the [binaries](#binaries) included in the
 [latest release][latest-release], unless otherwise specified.
 
 [Pre-releases](https://github.com/LizardByte/Sunshine/releases) are also available. These should be considered beta,
@@ -8,7 +8,7 @@ and release artifacts may be missing when merging changes on a faster cadence.
 
 ## Binaries
 
-Binaries of Sunshine are created for each release. They are available for Linux, macOS, and Windows.
+Binaries of Helios are created for each release. They are available for Linux, macOS, and Windows.
 Binaries can be found in the [latest release][latest-release].
 
 > [!NOTE]
@@ -24,7 +24,7 @@ Binaries can be found in the [latest release][latest-release].
 > The Docker images are not recommended for most users.
 
 Docker images are available on [Dockerhub.io](https://hub.docker.com/repository/docker/lizardbyte/sunshine)
-and [ghcr.io](https://github.com/orgs/LizardByte/packages?repo_name=sunshine).
+and [ghcr.io](https://github.com/orgs/LizardByte/packages?repo_name=helios).
 
 See [Docker](../DOCKER_README.md) for more information.
 
@@ -50,28 +50,28 @@ CUDA is used for NVFBC capture.
         <td rowspan="8">12.9.1</td>
         <td rowspan="8">575.57.08</td>
         <td rowspan="8">50;52;60;61;62;70;72;75;80;86;87;89;90;100;101;103;120;121</td>
-        <td>sunshine.AppImage</td>
+        <td>helios.AppImage</td>
     </tr>
     <tr>
-        <td>sunshine-ubuntu-22.04-{arch}.deb</td>
+        <td>helios-ubuntu-22.04-{arch}.deb</td>
     </tr>
     <tr>
-        <td>sunshine-ubuntu-24.04-{arch}.deb</td>
+        <td>helios-ubuntu-24.04-{arch}.deb</td>
     </tr>
     <tr>
-        <td>sunshine-debian-trixie-{arch}.deb</td>
+        <td>helios-debian-trixie-{arch}.deb</td>
     </tr>
     <tr>
-        <td>sunshine_{arch}.flatpak</td>
+        <td>helios_{arch}.flatpak</td>
     </tr>
     <tr>
-        <td>Sunshine (copr - Fedora 41)</td>
+        <td>Helios (copr - Fedora 41)</td>
     </tr>
     <tr>
-        <td>Sunshine (copr - Fedora 42)</td>
+        <td>Helios (copr - Fedora 42)</td>
     </tr>
     <tr>
-        <td>sunshine.pkg.tar.zst</td>
+        <td>helios.pkg.tar.zst</td>
     </tr>
 </table>
 
@@ -97,25 +97,25 @@ According to AppImageLint the supported distro matrix of the AppImage is below.
 - ✖ Rocky Linux 9
 
 ##### Install
-1. Download [sunshine.AppImage](https://github.com/LizardByte/Sunshine/releases/latest/download/sunshine.AppImage)
+1. Download [helios.AppImage](https://github.com/LizardByte/Sunshine/releases/latest/download/helios.AppImage)
    into your home directory.
    ```bash
    cd ~
-   wget https://github.com/LizardByte/Sunshine/releases/latest/download/sunshine.AppImage
+   wget https://github.com/LizardByte/Sunshine/releases/latest/download/helios.AppImage
    ```
 2. Open terminal and run the following command.
    ```bash
-   ./sunshine.AppImage --install
+   ./helios.AppImage --install
    ```
 
 ##### Run
 ```bash
-./sunshine.AppImage --install && ./sunshine.AppImage
+./helios.AppImage --install && ./helios.AppImage
 ```
 
 ##### Uninstall
 ```bash
-./sunshine.AppImage --remove
+./helios.AppImage --remove
 ```
 
 #### ArchLinux
@@ -127,15 +127,15 @@ According to AppImageLint the supported distro matrix of the AppImage is below.
 Follow the instructions at LizardByte's [pacman-repo](https://github.com/LizardByte/pacman-repo) to add
 the repository. Then run the following command.
 ```bash
-pacman -S sunshine
+pacman -S helios
 ```
 
 ##### Install PKGBUILD Archive
 Open terminal and run the following command.
 ```bash
-wget https://github.com/LizardByte/Sunshine/releases/latest/download/sunshine.pkg.tar.gz
-tar -xvf sunshine.pkg.tar.gz
-cd sunshine
+wget https://github.com/LizardByte/Sunshine/releases/latest/download/helios.pkg.tar.gz
+tar -xvf helios.pkg.tar.gz
+cd helios
 
 # install optional dependencies
 pacman -S cuda  # Nvidia GPU encoding support
@@ -146,14 +146,14 @@ makepkg -si
 
 ##### Uninstall
 ```bash
-pacman -R sunshine
+pacman -R helios
 ```
 
 #### Debian/Ubuntu
 ##### Install
-Download `sunshine-{distro}-{distro-version}-{arch}.deb` and run the following command.
+Download `helios-{distro}-{distro-version}-{arch}.deb` and run the following command.
 ```bash
-sudo dpkg -i ./sunshine-{distro}-{distro-version}-{arch}.deb
+sudo dpkg -i ./helios-{distro}-{distro-version}-{arch}.deb
 ```
 
 > [!NOTE]
@@ -165,7 +165,7 @@ sudo dpkg -i ./sunshine-{distro}-{distro-version}-{arch}.deb
 
 ##### Uninstall
 ```bash
-sudo apt remove sunshine
+sudo apt remove helios
 ```
 
 #### Fedora
@@ -186,12 +186,12 @@ sudo apt remove sunshine
 
 2. Install the package.
    ```bash
-   sudo dnf install Sunshine
+   sudo dnf install Helios
    ```
 
 ##### Uninstall
 ```bash
-sudo dnf remove Sunshine
+sudo dnf remove Helios
 ```
 
 #### Flatpak
@@ -202,7 +202,7 @@ sudo dnf remove Sunshine
 Using this package requires that you have [Flatpak](https://flatpak.org/setup) installed.
 
 ##### Download (local option)
-1. Download `sunshine_{arch}.flatpak` and run the following command.
+1. Download `helios_{arch}.flatpak` and run the following command.
 
    > [!NOTE]
    > Replace `{arch}` with your system architecture.
@@ -215,7 +215,7 @@ flatpak install --system flathub dev.moonlightos.Helios
 
 **Local**
 ```bash
-flatpak install --system ./sunshine_{arch}.flatpak
+flatpak install --system ./helios_{arch}.flatpak
 ```
 
 ##### Install (user level)
@@ -226,7 +226,7 @@ flatpak install --user flathub dev.moonlightos.Helios
 
 **Local**
 ```bash
-flatpak install --user ./sunshine_{arch}.flatpak
+flatpak install --user ./helios_{arch}.flatpak
 ```
 
 ##### Additional installation (required)
@@ -262,18 +262,18 @@ This package requires that you have [Homebrew](https://docs.brew.sh/Installation
 brew update
 brew upgrade
 brew tap LizardByte/homebrew
-brew install sunshine
+brew install helios
 ```
 
 ##### Uninstall
 ```bash
-brew uninstall sunshine
+brew uninstall helios
 ```
 
 ### macOS
 
 > [!IMPORTANT]
-> Sunshine on macOS is experimental. Gamepads do not work.
+> Helios on macOS is experimental. Gamepads do not work.
 
 #### Homebrew
 This package requires that you have [Homebrew](https://docs.brew.sh/Installation) installed.
@@ -281,29 +281,29 @@ This package requires that you have [Homebrew](https://docs.brew.sh/Installation
 ##### Install
 ```bash
 brew tap LizardByte/homebrew
-brew install sunshine
+brew install helios
 ```
 
 ##### Uninstall
 ```bash
-brew uninstall sunshine
+brew uninstall helios
 ```
 
 > [!TIP]
-> For beta you can replace `sunshine` with `sunshine-beta` in the above commands.
+> For beta you can replace `helios` with `helios-beta` in the above commands.
 
 ### Windows
 
 #### Installer (recommended)
 
 1. Download and install
-   [Sunshine-Windows-AMD64-installer.exe](https://github.com/LizardByte/Sunshine/releases/latest/download/Sunshine-Windows-AMD64-installer.exe)
+   [Helios-Windows-AMD64-installer.exe](https://github.com/LizardByte/Sunshine/releases/latest/download/Helios-Windows-AMD64-installer.exe)
 
 > [!CAUTION]
 > You should carefully select or unselect the options you want to install. Do not blindly install or
 > enable features.
 
-To uninstall, find Sunshine in the list <a href="ms-settings:installed-apps">here</a> and select "Uninstall" from the
+To uninstall, find Helios in the list <a href="ms-settings:installed-apps">here</a> and select "Uninstall" from the
 overflow menu. Different versions of Windows may provide slightly different steps for uninstall.
 
 #### Standalone (lite version)
@@ -313,7 +313,7 @@ overflow menu. Different versions of Windows may provide slightly different step
 > recommended for most users. No support will be provided!
 
 1. Download and extract
-   [Sunshine-Windows-AMD64-portable.zip](https://github.com/LizardByte/Sunshine/releases/latest/download/Sunshine-Windows-AMD64-portable.zip)
+   [Helios-Windows-AMD64-portable.zip](https://github.com/LizardByte/Sunshine/releases/latest/download/Helios-Windows-AMD64-portable.zip)
 2. Open command prompt as administrator
 3. Firewall rules
 
@@ -370,36 +370,36 @@ After installation, some initial setup is required.
 
 > [!NOTE]
 > `cap_sys_admin` may as well be root, except you don't need to be root to run the program. This is necessary to
-> allow Sunshine to use KMS capture.
+> allow Helios to use KMS capture.
 
 ##### Enable
 ```bash
-sudo setcap cap_sys_admin+p $(readlink -f $(which sunshine))
+sudo setcap cap_sys_admin+p $(readlink -f $(which helios))
 ```
 
 #### X11 Capture
 For X11 capture to work, you may need to disable the capabilities that were set for KMS capture.
 
 ```bash
-sudo setcap -r $(readlink -f $(which sunshine))
+sudo setcap -r $(readlink -f $(which helios))
 ```
 
 #### Service
 
 **Start once**
 ```bash
-systemctl --user start sunshine
+systemctl --user start helios
 ```
 
 **Start on boot**
 ```bash
-systemctl --user enable sunshine
+systemctl --user enable helios
 ```
 
 ### macOS
-The first time you start Sunshine, you will be asked to grant access to screen recording and your microphone.
+The first time you start Helios, you will be asked to grant access to screen recording and your microphone.
 
-Sunshine can only access microphones on macOS due to system limitations. To stream system audio use
+Helios can only access microphones on macOS due to system limitations. To stream system audio use
 [Soundflower](https://github.com/mattingalls/Soundflower) or
 [BlackHole](https://github.com/ExistentialAudio/BlackHole).
 
@@ -412,20 +412,20 @@ Sunshine can only access microphones on macOS due to system limitations. To stre
 ## Usage
 
 ### Basic usage
-If Sunshine is not installed/running as a service, then start Sunshine with the following command, unless a start
+If Helios is not installed/running as a service, then start Helios with the following command, unless a start
 command is listed in the specified package [install](#install) instructions above.
 
 > [!NOTE]
-> A service is a process that runs in the background. This is the default when installing Sunshine from the
-> Windows installer. Running multiple instances of Sunshine is not advised.
+> A service is a process that runs in the background. This is the default when installing Helios from the
+> Windows installer. Running multiple instances of Helios is not advised.
 
 ```bash
-sunshine
+helios
 ```
 
 ### Specify config file
 ```bash
-sunshine <directory of conf file>/sunshine.conf
+helios <directory of conf file>/helios.conf
 ```
 
 > [!NOTE]
@@ -434,30 +434,30 @@ sunshine <directory of conf file>/sunshine.conf
 > [!TIP]
 > The configuration file specified will be created if it doesn't exist.
 
-### Start Sunshine over SSH (Linux/X11)
+### Start Helios over SSH (Linux/X11)
 Assuming you are already logged into the host, you can use this command
 
 ```bash
-ssh <user>@<ip_address> 'export DISPLAY=:0; sunshine'
+ssh <user>@<ip_address> 'export DISPLAY=:0; helios'
 ```
 
 If you are logged into the host with only a tty (teletypewriter), you can use `startx` to start the X server prior to
-executing Sunshine. You nay need to add `sleep` between `startx` and `sunshine` to allow more time for the display to
+executing Helios. You nay need to add `sleep` between `startx` and `helios` to allow more time for the display to
 be ready.
 
 ```bash
-ssh <user>@<ip_address> 'startx &; export DISPLAY=:0; sunshine'
+ssh <user>@<ip_address> 'startx &; export DISPLAY=:0; helios'
 ```
 
 > [!TIP]
 > You could also use the `~/.bash_profile` or `~/.bashrc` files to set up the `DISPLAY` variable.
 
-@seealso{See [Remote SSH Headless Setup](https://app.lizardbyte.dev/2023-09-14-remote-ssh-headless-sunshine-setup)
+@seealso{See [Remote SSH Headless Setup](https://app.lizardbyte.dev/2023-09-14-remote-ssh-headless-helios-setup)
 on how to set up a headless streaming server without autologin and dummy plugs (X11 + NVidia GPUs)}
 
 ### Configuration
 
-Sunshine is configured via the web ui, which is available on [https://localhost:47990](https://localhost:47990)
+Helios is configured via the web ui, which is available on [https://localhost:47990](https://localhost:47990)
 by default. You may replace *localhost* with your internal ip address.
 
 > [!NOTE]
@@ -482,13 +482,13 @@ To get a list of available arguments, run the following command.
 
 @tabs{
    @tab{ General | ```bash
-      sunshine --help
+      helios --help
       ```}
    @tab{ AppImage | ```bash
-      ./sunshine.AppImage --help
+      ./helios.AppImage --help
       ```}
    @tab{ Flatpak | ```bash
-      flatpak run --command=sunshine dev.moonlightos.Helios --help
+      flatpak run --command=helios dev.moonlightos.Helios --help
       ```}
 }
 
@@ -504,11 +504,11 @@ All shortcuts start with `Ctrl+Alt+Shift`, just like Moonlight.
 * You can use Environment variables in place of values
 * `$(HOME)` will be replaced by the value of `$HOME`
 * `$$` will be replaced by `$`, e.g. `$$(HOME)` will be become `$(HOME)`
-* `env` - Adds or overwrites Environment variables for the commands/applications run by Sunshine.
+* `env` - Adds or overwrites Environment variables for the commands/applications run by Helios.
   This can only be changed by modifying the `apps.json` file directly.
 
 ### Considerations
-* On Windows, Sunshine uses the Desktop Duplication API which only supports capturing from the GPU used for display.
+* On Windows, Helios uses the Desktop Duplication API which only supports capturing from the GPU used for display.
   If you want to capture and encode on the eGPU, connect a display or HDMI dummy display dongle to it and run the games
   on that display.
 * When an application is started, if there is an application already running, it will be terminated.
@@ -523,7 +523,7 @@ All shortcuts start with `Ctrl+Alt+Shift`, just like Moonlight.
   instead it simply starts a stream. If you removed it and would like to get it back, just add a new application with
   the name "Desktop" and "desktop.png" as the image path.
 * For the Linux flatpak you must prepend commands with `flatpak-spawn --host`.
-* If inputs (mouse, keyboard, gamepads...) aren't working after connecting, add the user running sunshine to the `input` group.
+* If inputs (mouse, keyboard, gamepads...) aren't working after connecting, add the user running helios to the `input` group.
 
 ### HDR Support
 Streaming HDR content is officially supported on Windows hosts and experimentally supported for Linux hosts.

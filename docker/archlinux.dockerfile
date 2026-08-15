@@ -2,10 +2,10 @@
 # artifacts: true
 # platforms: linux/amd64
 # archlinux does not have an arm64 base image
-# no-cache-filters: artifacts,sunshine
+# no-cache-filters: artifacts,helios
 ARG BASE=archlinux/archlinux
 ARG TAG=base-devel
-FROM ${BASE}:${TAG} AS sunshine-base
+FROM ${BASE}:${TAG} AS helios-base
 
 # Update keyring to avoid signature errors, and update system
 RUN <<_DEPS
@@ -17,7 +17,7 @@ pacman -Syu --disable-download-timeout --noconfirm
 pacman -Scc --noconfirm
 _DEPS
 
-FROM sunshine-base AS sunshine-deps
+FROM helios-base AS helios-deps
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -45,7 +45,7 @@ pacman -Syu --disable-download-timeout --needed --noconfirm \
 pacman -Scc --noconfirm
 _SETUP
 
-FROM sunshine-deps AS sunshine-build
+FROM helios-deps AS helios-build
 
 ARG BRANCH
 ARG BUILD_VERSION
@@ -69,11 +69,11 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 USER builder
 
 # copy repository
-WORKDIR /build/sunshine/
+WORKDIR /build/helios/
 COPY --link .. .
 
 # setup build directory
-WORKDIR /build/sunshine/build
+WORKDIR /build/helios/build
 
 # configure PKGBUILD file
 RUN <<_MAKE
@@ -89,13 +89,13 @@ cmake \
   -DSUNSHINE_CONFIGURE_ONLY=ON \
   -DSUNSHINE_CONFIGURE_PKGBUILD=ON \
   -DSUNSHINE_SUB_VERSION="${sub_version}" \
-  /build/sunshine
+  /build/helios
 _MAKE
 
-WORKDIR /build/sunshine/pkg
+WORKDIR /build/helios/pkg
 RUN <<_PACKAGE
-mv /build/sunshine/build/PKGBUILD .
-mv /build/sunshine/build/sunshine.install .
+mv /build/helios/build/PKGBUILD .
+mv /build/helios/build/helios.install .
 makepkg --printsrcinfo > .SRCINFO
 _PACKAGE
 
@@ -104,7 +104,7 @@ USER root
 RUN <<_REPO
 #!/bin/bash
 set -e
-tar -czf /build/sunshine/sunshine.pkg.tar.gz .
+tar -czf /build/helios/helios.pkg.tar.gz .
 _REPO
 
 # namcap and build PKGBUILD file
@@ -118,26 +118,26 @@ export DISPLAY=:1
 Xvfb ${DISPLAY} -screen 0 1024x768x24 &
 namcap -i PKGBUILD
 makepkg -si --noconfirm
-rm -f /build/sunshine/pkg/sunshine-debug*.pkg.tar.zst
+rm -f /build/helios/pkg/helios-debug*.pkg.tar.zst
 ls -a
 _PKGBUILD
 
-FROM sunshine-base AS sunshine
+FROM helios-base AS helios
 
-COPY --link --from=sunshine-build /build/sunshine/pkg/sunshine*.pkg.tar.zst /sunshine.pkg.tar.zst
+COPY --link --from=helios-build /build/helios/pkg/helios*.pkg.tar.zst /helios.pkg.tar.zst
 
 # artifacts to be extracted in CI
-COPY --link --from=sunshine-build /build/sunshine/pkg/sunshine*.pkg.tar.zst /artifacts/sunshine.pkg.tar.zst
-COPY --link --from=sunshine-build /build/sunshine/sunshine.pkg.tar.gz /artifacts/sunshine.pkg.tar.gz
+COPY --link --from=helios-build /build/helios/pkg/helios*.pkg.tar.zst /artifacts/helios.pkg.tar.zst
+COPY --link --from=helios-build /build/helios/helios.pkg.tar.gz /artifacts/helios.pkg.tar.gz
 
-# install sunshine
-RUN <<_INSTALL_SUNSHINE
+# install helios
+RUN <<_INSTALL_HELIOS
 #!/bin/bash
 set -e
 pacman -U --disable-download-timeout --needed --noconfirm \
-  /sunshine.pkg.tar.zst
+  /helios.pkg.tar.zst
 pacman -Scc --noconfirm
-_INSTALL_SUNSHINE
+_INSTALL_HELIOS
 
 # network setup
 EXPOSE 47984-47990/tcp
@@ -161,8 +161,8 @@ RUN <<_SETUP_USER
 set -e
 groupadd -f -g "${PGID}" "${UNAME}"
 useradd -lm -d ${HOME} -s /bin/bash -g "${PGID}" -u "${PUID}" "${UNAME}"
-mkdir -p ${HOME}/.config/sunshine
-ln -s ${HOME}/.config/sunshine /config
+mkdir -p ${HOME}/.config/helios
+ln -s ${HOME}/.config/helios /config
 chown -R ${UNAME} ${HOME}
 _SETUP_USER
 
@@ -170,4 +170,4 @@ USER ${UNAME}
 WORKDIR ${HOME}
 
 # entrypoint
-ENTRYPOINT ["/usr/bin/sunshine"]
+ENTRYPOINT ["/usr/bin/helios"]

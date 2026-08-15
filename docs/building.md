@@ -1,5 +1,5 @@
 # Building
-Sunshine binaries are built using [CMake](https://cmake.org) and requires `cmake` > 3.25.
+Helios binaries are built using [CMake](https://cmake.org) and requires `cmake` > 3.25.
 
 ## Building Locally
 
@@ -21,7 +21,7 @@ dependencies we use in Debian-based and Fedora-based distributions. Please submi
 script to support other distributions.
 
 ##### CUDA Toolkit
-Sunshine requires CUDA Toolkit for NVFBC capture. There are two caveats to CUDA:
+Helios requires CUDA Toolkit for NVFBC capture. There are two caveats to CUDA:
 
 1. The version installed depends on the version of GCC.
 2. The version of CUDA you use will determine compatibility with various GPU generations.

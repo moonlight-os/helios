@@ -31,7 +31,7 @@ Read our contribution guide in our organization level
 }
 
 ### Localization
-Sunshine and related LizardByte projects are being localized into various languages.
+Helios and related LizardByte projects are being localized into various languages.
 The default language is `en` (English).
 
 ![](https://app.lizardbyte.dev/dashboard/crowdin/LizardByte_graph.svg)
@@ -45,13 +45,13 @@ The translations occur on [CrowdIn][crowdin-url].
 Anyone is free to contribute to the localization there.
 
 ##### Translation Basics
-* The brand names *LizardByte* and *Sunshine* should never be translated.
+* The brand names *LizardByte* and *Helios* should never be translated.
 * Other brand names should never be translated. Examples include *AMD*, *Intel*, and *NVIDIA*.
 
 ##### CrowdIn Integration
 How does it work?
 
-When a change is made to Sunshine source code, a workflow generates new translation templates
+When a change is made to Helios source code, a workflow generates new translation templates
 that get pushed to CrowdIn automatically.
 
 When translations are updated on CrowdIn, a push gets made to the *l10n_master* branch and a PR is made against the
@@ -61,14 +61,14 @@ next release.
 #### Extraction
 
 ##### Web UI
-Sunshine uses [Vue I18n](https://vue-i18n.intlify.dev) for localizing the UI.
+Helios uses [Vue I18n](https://vue-i18n.intlify.dev) for localizing the UI.
 The following is a simple example of how to use it.
 
 * Add the string to the `./src_assets/common/assets/web/public/assets/locale/en.json` file, in English.
   ```json
   {
    "index": {
-     "welcome": "Hello, Sunshine!"
+     "welcome": "Hello, Helios!"
    }
   }
   ```
@@ -81,7 +81,7 @@ The following is a simple example of how to use it.
   > Due to the integration with Crowdin, it is important to only add strings to the *en.json* file,
   > and to not modify any other language files. After the PR is merged, the translations can take place
   > on [CrowdIn][crowdin-url]. Once the translations are complete, a PR will be made
-  > to merge the translations into Sunshine.
+  > to merge the translations into Helios.
 
 * Use the string in the Vue component.
   ```html
@@ -117,7 +117,7 @@ some situations. For example the system tray icon could be localized as it is us
 > The below is for information only. Contributors should never include manually updated template files, or
 > manually compiled language files in Pull Requests.
 
-Strings are automatically extracted from the code to the `locale/sunshine.po` template file. The generated file is
+Strings are automatically extracted from the code to the `locale/helios.po` template file. The generated file is
 used by CrowdIn to generate language specific template files. The file is generated using the
 `.github/workflows/localize.yml` workflow and is run on any push event into the `master` branch. Jobs are only run if
 any of the following paths are modified.
@@ -144,7 +144,7 @@ required for this, along with the python dependencies in the `./scripts/requirem
 > Due to the integration with CrowdIn, it is important to not include any extracted or compiled files in
 > Pull Requests. The files are automatically generated and updated by the workflow. Once the PR is merged, the
 > translations can take place on [CrowdIn][crowdin-url]. Once the translations are
-> complete, a PR will be made to merge the translations into Sunshine.
+> complete, a PR will be made to merge the translations into Helios.
 
 ### Testing
 
@@ -163,7 +163,7 @@ python ./scripts/update_clang_format.py
 ```
 
 #### Unit Testing
-Sunshine uses [Google Test](https://github.com/google/googletest) for unit testing. Google Test is included in the
+Helios uses [Google Test](https://github.com/google/googletest) for unit testing. Google Test is included in the
 repo as a submodule. The test sources are located in the `./tests` directory.
 
 The tests need to be compiled into an executable, and then run. The tests are built using the normal build process, but
@@ -172,13 +172,13 @@ can be disabled by setting the `BUILD_TESTS` CMake option to `OFF`.
 To run the tests, execute the following command.
 
 ```bash
-./build/tests/test_sunshine
+./build/tests/test_helios
 ```
 
 To see all available options, run the tests with the `--help` flag.
 
 ```bash
-./build/tests/test_sunshine --help
+./build/tests/test_helios --help
 ```
 
 > [!TIP]

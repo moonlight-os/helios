@@ -26,7 +26,7 @@ Check out the [Wiki](https://github.com/ClassicOldSong/Apollo/wiki/Permission-Sy
 ## About Virtual Display
 
 > [!WARNING]
-> ***It is highly recommend to remove any other virtual display solutions from your system and Apollo/Sunshine config, to reduce confusions and compatibility issues.***
+> ***It is highly recommend to remove any other virtual display solutions from your system and Apollo/Helios config, to reduce confusions and compatibility issues.***
 
 > [!NOTE]
 > **TL;DR** Just treat your Artemis/Moonlight client like a dedicated PnP monitor with Apollo.
@@ -192,11 +192,11 @@ See more details on the chocolatey package [here](https://community.chocolatey.o
 
 ## Disclaimer
 
-I got kicked from Moonlight and Sunshine's Discord server and banned from Sunshine's GitHub repo literally for helping people out.
+I got kicked from Moonlight and Helios's Discord server and banned from Helios's GitHub repo literally for helping people out.
 
 This is what I got for finding a bug, opened an issue, getting no response, troubleshoot myself, fixed the issue myself, shared it by PR to the main repo hoping my efforts can help someone else during the maintenance gap.
 
-Yes, I'm going away. [Apollo](https://github.com/ClassicOldSong/Apollo) and [Artemis(Moonlight Noir)](https://github.com/ClassicOldSong/moonlight-android) will no longer be compatible with OG Sunshine and OG Moonlight eventually, but they'll work even better with much more carefully designed features.
+Yes, I'm going away. [Apollo](https://github.com/ClassicOldSong/Apollo) and [Artemis(Moonlight Noir)](https://github.com/ClassicOldSong/moonlight-android) will no longer be compatible with OG Helios and OG Moonlight eventually, but they'll work even better with much more carefully designed features.
 
 The Moonlight repo had stayed silent for 5 months, with nobody actually responding to issues, and people are getting totally no help besides the limited FAQ in their Discord server. I tried to answer issues and questions, solve problems within my ability but I got kicked out just for helping others.
 

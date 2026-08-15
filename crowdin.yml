@@ -26,7 +26,7 @@
   },
   {
     "source": "/src_assets/common/assets/web/public/assets/locale/en.json",
-    "dest": "/sunshine.json",
+    "dest": "/helios.json",
     "translation": "/src_assets/common/assets/web/public/assets/locale/%two_letters_code%.%file_extension%",
     "update_option": "update_as_unapproved"
   }
