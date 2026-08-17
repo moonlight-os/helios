@@ -62,6 +62,7 @@ extern "C" {
 #define IDX_CLIPBOARD_OFFER 20
 #define IDX_CLIPBOARD_REQUEST 21
 #define IDX_CLIPBOARD_DATA 22
+#define IDX_KEYBOARD_LAYOUT 23
 
 static const short packetTypes[] = {
   0x0305,  // Start A
@@ -87,6 +88,7 @@ static const short packetTypes[] = {
   0x6001,  // Clipboard offer (Moonlight OS protocol extension)
   0x6002,  // Clipboard request (Moonlight OS protocol extension)
   0x6003,  // Clipboard data (Moonlight OS protocol extension)
+  0x6004,  // Keyboard layout (Moonlight OS protocol extension)
 };
 
 namespace asio = boost::asio;
@@ -387,6 +389,11 @@ namespace stream {
     // been replaced, and applying it would let a slow transfer overwrite a
     // newer copy.
     std::uint32_t clipboard_pending_seq = 0;
+
+    // The XKB layout the client says it types on, e.g. "fr"/"azerty". Empty
+    // until it says so, and empty forever for a client that does not send it.
+    std::string keyboard_layout;
+    std::string keyboard_variant;
 
     struct {
       std::string ping_payload;
@@ -1310,6 +1317,7 @@ namespace stream {
       // the honest report rather than a placeholder.
       static const std::vector<std::pair<std::uint16_t, std::uint16_t>> local_features = {
         {ML_FEATURE_CLIPBOARD, 1},
+        {ML_FEATURE_KEYBOARD_LAYOUT, 1},
       };
 
       // Fixed capacity rather than a vector: encode_control is a template over
@@ -1470,6 +1478,40 @@ namespace stream {
       }
 
       send_clipboard_data(server, session, seq, format, content);
+    });
+
+    server->map(packetTypes[IDX_KEYBOARD_LAYOUT], [server](session_t *session, const std::string_view &payload) {
+      if (payload.size() < 6) {
+        return;
+      }
+
+      auto bytes = reinterpret_cast<const std::uint8_t *>(payload.data());
+      if (bytes[0] != 1) {
+        BOOST_LOG(info) << "Ignoring keyboard layout in unknown format "sv << (int) bytes[0];
+        return;
+      }
+
+      std::size_t layout_len = bytes[2] | (bytes[3] << 8);
+      std::size_t variant_len = bytes[4] | (bytes[5] << 8);
+
+      // Lengths are the sender's claim until checked against what arrived.
+      if (6 + layout_len + variant_len > payload.size()) {
+        BOOST_LOG(warning) << "Keyboard layout message is shorter than it claims"sv;
+        return;
+      }
+
+      session->keyboard_layout.assign(payload.data() + 6, layout_len);
+      session->keyboard_variant.assign(payload.data() + 6 + layout_len, variant_len);
+
+      BOOST_LOG(info) << "Client ["sv << session->device_name << "] types on layout ["sv
+                      << session->keyboard_layout
+                      << (session->keyboard_variant.empty() ? "" : "/")
+                      << session->keyboard_variant << ']';
+
+      // Recorded, not applied. Switching the host's keyboard layout changes it
+      // for whoever is sitting at that machine too, and there is no portable
+      // way to do it per-device across compositors -- so what to do with this
+      // is a policy decision rather than something to assume.
     });
 
     server->map(packetTypes[IDX_SET_CLIPBOARD], [server](session_t *session, const std::string_view &payload) {
