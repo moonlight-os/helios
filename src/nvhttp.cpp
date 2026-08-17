@@ -1529,110 +1529,15 @@ namespace nvhttp {
     response->close_connection_after_response = true;
   }
 
-  void getClipboard(resp_https_t response, req_https_t request) {
-    print_req<HeliosHTTPS>(request);
-
-    auto named_cert_p = get_verified_cert(request);
-
-    if (
-      !(named_cert_p->perm & PERM::_allow_view)
-      || !(named_cert_p->perm & PERM::clipboard_read)
-    ) {
-      BOOST_LOG(debug) << "Permission Read Clipboard denied for [" << named_cert_p->name << "] (" << (uint32_t)named_cert_p->perm << ")";
-
-      response->write(SimpleWeb::StatusCode::client_error_unauthorized);
-      response->close_connection_after_response = true;
-      return;
-    }
-
-    auto args = request->parse_query_string();
-    auto clipboard_type = get_arg(args, "type");
-    if (clipboard_type != "text"sv) {
-      BOOST_LOG(debug) << "Clipboard type [" << clipboard_type << "] is not supported!";
-
-      response->write(SimpleWeb::StatusCode::client_error_bad_request);
-      response->close_connection_after_response = true;
-      return;
-    }
-
-    std::list<std::string> connected_uuids = rtsp_stream::get_all_session_uuids();
-
-    bool found = !connected_uuids.empty();
-
-    if (found) {
-      found = (std::find(connected_uuids.begin(), connected_uuids.end(), named_cert_p->uuid) != connected_uuids.end());
-    }
-
-    if (!found) {
-      BOOST_LOG(debug) << "Client ["<< named_cert_p->name << "] trying to get clipboard is not connected to a stream";
-
-      response->write(SimpleWeb::StatusCode::client_error_forbidden);
-      response->close_connection_after_response = true;
-      return;
-    }
-
-    std::string content = platf::get_clipboard();
-    response->write(content);
-    return;
-  }
-
-  void
-  setClipboard(resp_https_t response, req_https_t request) {
-    print_req<HeliosHTTPS>(request);
-
-    auto named_cert_p = get_verified_cert(request);
-
-    if (
-      !(named_cert_p->perm & PERM::_allow_view)
-      || !(named_cert_p->perm & PERM::clipboard_set)
-    ) {
-      BOOST_LOG(debug) << "Permission Write Clipboard denied for [" << named_cert_p->name << "] (" << (uint32_t)named_cert_p->perm << ")";
-
-      response->write(SimpleWeb::StatusCode::client_error_unauthorized);
-      response->close_connection_after_response = true;
-      return;
-    }
-
-    auto args = request->parse_query_string();
-    auto clipboard_type = get_arg(args, "type");
-    if (clipboard_type != "text"sv) {
-      BOOST_LOG(debug) << "Clipboard type [" << clipboard_type << "] is not supported!";
-
-      response->write(SimpleWeb::StatusCode::client_error_bad_request);
-      response->close_connection_after_response = true;
-      return;
-    }
-
-    std::list<std::string> connected_uuids = rtsp_stream::get_all_session_uuids();
-
-    bool found = !connected_uuids.empty();
-
-    if (found) {
-      found = (std::find(connected_uuids.begin(), connected_uuids.end(), named_cert_p->uuid) != connected_uuids.end());
-    }
-
-    if (!found) {
-      BOOST_LOG(debug) << "Client ["<< named_cert_p->name << "] trying to set clipboard is not connected to a stream";
-
-      response->write(SimpleWeb::StatusCode::client_error_forbidden);
-      response->close_connection_after_response = true;
-      return;
-    }
-
-    std::string content = request->content.string();
-
-    bool success = platf::set_clipboard(content);
-
-    if (!success) {
-      BOOST_LOG(debug) << "Setting clipboard failed!";
-
-      response->write(SimpleWeb::StatusCode::server_error_internal_server_error);
-      response->close_connection_after_response = true;
-    }
-
-    response->write();
-    return;
-  }
+  // getClipboard and setClipboard used to live here, polled over HTTPS by the
+  // client. The clipboard now rides the control stream instead (0x6001-0x6003
+  // on CTRL_CHANNEL_FEATURE), which is what lets the host push a copy to the
+  // client rather than only answering when asked, and what lets an offer say
+  // what formats it has without sending them.
+  //
+  // Removed rather than left in place. Two paths writing the same selection
+  // means two sets of permission checks and two loop-prevention stories, and
+  // the poll would keep fetching from a host that has already pushed.
 
   void setup(const std::string &pkey, const std::string &cert) {
     conf_intern.pkey = pkey;
@@ -1732,8 +1637,6 @@ namespace nvhttp {
       resume(host_audio, resp, req);
     };
     https_server.resource["^/cancel$"]["GET"] = cancel;
-    https_server.resource["^/actions/clipboard$"]["GET"] = getClipboard;
-    https_server.resource["^/actions/clipboard$"]["POST"] = setClipboard;
 
     https_server.config.reuse_address = true;
     https_server.config.address = net::af_to_any_address_string(address_family);

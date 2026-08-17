@@ -31,6 +31,7 @@
 #include <boost/process/v1/io.hpp>
 #include <boost/process/v1/start_dir.hpp>
 #include <fcntl.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 // local includes
@@ -1063,15 +1064,198 @@ std::string get_local_ip_for_gateway() {
     return std::make_unique<linux_high_precision_timer>();
   }
 
+  namespace {
+    /**
+     * @brief Largest clipboard this host will read or write.
+     *
+     * Deliberately the same number as ML_CLIPBOARD_MAX_BYTES in the protocol,
+     * so a selection that would be refused on the wire is refused here first
+     * rather than being read into memory and then thrown away. Duplicated as a
+     * literal rather than included, because this file has no business pulling
+     * in the streaming protocol headers just for a bound.
+     */
+    constexpr std::size_t max_clipboard_bytes = 4 * 1024 * 1024;
+
+    /**
+     * @brief Run a clipboard tool, with none of our file descriptors inherited.
+     *
+     * popen() would be shorter and is wrong here, and the failure is worth
+     * spelling out because it does not look like a clipboard bug at all:
+     * wl-copy forks and stays alive to serve the selection, and a child
+     * started by popen() inherits every descriptor this process holds --
+     * including the RTSP listening socket. The orphaned wl-copy then keeps
+     * port 48010 open for as long as the selection lives, and the next Helios
+     * start dies with "Address already in use". Observed exactly that.
+     *
+     * So: fork, close everything above stderr in the child, exec.
+     *
+     * @param argv NULL-terminated argument vector.
+     * @param input Data to write to the child's stdin, or nullptr to read instead.
+     * @param output Where to collect the child's stdout, or nullptr to write instead.
+     * @return true when the child ran and exited zero.
+     */
+    bool
+    run_clipboard_tool(const char *const argv[], const std::string *input, std::string *output) {
+      int fds[2];
+      if (pipe(fds) != 0) {
+        return false;
+      }
+
+      auto pid = fork();
+      if (pid < 0) {
+        close(fds[0]);
+        close(fds[1]);
+        return false;
+      }
+
+      if (pid == 0) {
+        // Child. Wire the pipe to the end we need, then drop every other
+        // descriptor so nothing of ours can outlive us in a daemonised tool.
+        if (input) {
+          dup2(fds[0], STDIN_FILENO);
+        }
+        else {
+          dup2(fds[1], STDOUT_FILENO);
+        }
+        close(fds[0]);
+        close(fds[1]);
+
+        // closefrom() is the right call and is glibc 2.34+; the loop is for
+        // everything older, and is cheap enough at these limits.
+#if defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 34))
+        closefrom(STDERR_FILENO + 1);
+#else
+        auto max_fd = sysconf(_SC_OPEN_MAX);
+        for (int fd = STDERR_FILENO + 1; fd < (int) max_fd; ++fd) {
+          close(fd);
+        }
+#endif
+
+        execvp(argv[0], (char *const *) argv);
+        _exit(127);
+      }
+
+      // Parent.
+      bool ok = true;
+      if (input) {
+        close(fds[0]);
+        auto remaining = input->size();
+        auto at = input->data();
+        while (remaining > 0) {
+          auto written = write(fds[1], at, remaining);
+          if (written <= 0) {
+            ok = false;
+            break;
+          }
+          at += written;
+          remaining -= written;
+        }
+        close(fds[1]);
+      }
+      else {
+        close(fds[1]);
+        char buffer[4096];
+        ssize_t read_bytes;
+        while ((read_bytes = read(fds[0], buffer, sizeof(buffer))) > 0) {
+          output->append(buffer, read_bytes);
+          if (output->size() > max_clipboard_bytes) {
+            BOOST_LOG(warning) << "Clipboard contents exceed "sv << max_clipboard_bytes << " bytes; ignoring"sv;
+            output->clear();
+            ok = false;
+            break;
+          }
+        }
+        close(fds[0]);
+      }
+
+      int status = 0;
+      while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+      }
+
+      return ok && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+    }
+
+    /**
+     * @brief Which clipboard tool this session needs, or nullptr when there is no session to talk to.
+     *
+     * There is no portable way to reach a Linux clipboard from a process that
+     * is not part of the graphical session: the selection lives in the
+     * compositor or X server, owned by a client. Sunshine shells out to the
+     * session's own tools for the same reason, and so do we.
+     *
+     * WAYLAND_DISPLAY is checked first because a Wayland session usually also
+     * has DISPLAY set for Xwayland, and answering the X server there would
+     * read a clipboard that most applications are not using.
+     */
+    enum class clipboard_session {
+      none,
+      wayland,
+      x11,
+    };
+
+    clipboard_session
+    detect_clipboard_session() {
+      if (std::getenv("WAYLAND_DISPLAY")) {
+        return clipboard_session::wayland;
+      }
+      if (std::getenv("DISPLAY")) {
+        return clipboard_session::x11;
+      }
+      return clipboard_session::none;
+    }
+  }  // namespace
+
   std::string
   get_clipboard() {
-    // Placeholder
-    return "";
+    std::string content;
+
+    switch (detect_clipboard_session()) {
+      case clipboard_session::wayland: {
+        const char *const argv[] = {"wl-paste", "--no-newline", nullptr};
+        // An empty clipboard makes these tools exit non-zero, which is not an
+        // error worth reporting -- it is simply nothing to paste.
+        if (!run_clipboard_tool(argv, nullptr, &content)) {
+          return {};
+        }
+        break;
+      }
+      case clipboard_session::x11: {
+        const char *const argv[] = {"xclip", "-selection", "clipboard", "-o", nullptr};
+        if (!run_clipboard_tool(argv, nullptr, &content)) {
+          return {};
+        }
+        break;
+      }
+      case clipboard_session::none:
+        BOOST_LOG(debug) << "No graphical session to read a clipboard from"sv;
+        return {};
+    }
+
+    return content;
   }
 
   bool
-  set_clipboard(const std::string& content) {
-    // Placeholder
+  set_clipboard(const std::string &content) {
+    if (content.size() > max_clipboard_bytes) {
+      BOOST_LOG(warning) << "Refusing to set a "sv << content.size() << " byte clipboard"sv;
+      return false;
+    }
+
+    switch (detect_clipboard_session()) {
+      case clipboard_session::wayland: {
+        const char *const argv[] = {"wl-copy", nullptr};
+        return run_clipboard_tool(argv, &content, nullptr);
+      }
+      case clipboard_session::x11: {
+        const char *const argv[] = {"xclip", "-selection", "clipboard", "-i", nullptr};
+        return run_clipboard_tool(argv, &content, nullptr);
+      }
+      case clipboard_session::none:
+        BOOST_LOG(debug) << "No graphical session to set a clipboard on"sv;
+        return false;
+    }
+
     return false;
   }
+
 }  // namespace platf
