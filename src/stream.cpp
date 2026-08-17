@@ -58,6 +58,7 @@ extern "C" {
 #define IDX_SET_CLIPBOARD 16
 #define IDX_FILE_TRANSFER_NONCE_REQUEST 17
 #define IDX_SET_ADAPTIVE_TRIGGERS 18
+#define IDX_FEATURE_ADVERTISE 19
 
 static const short packetTypes[] = {
   0x0305,  // Start A
@@ -79,6 +80,7 @@ static const short packetTypes[] = {
   0x3001,  // Set Clipboard (Helios protocol extension)
   0x3002,  // File transfer nonce request (Helios protocol extension)
   0x5503,  // Set Adaptive triggers (Helios protocol extension)
+  0x6000,  // Feature advertisement (Moonlight OS protocol extension)
 };
 
 namespace asio = boost::asio;
@@ -367,6 +369,12 @@ namespace stream {
     safe::shared_t<broadcast_ctx_t>::ptr_t broadcast_ref;
 
     boost::asio::ip::address localAddress;
+
+    // What this client said it supports, keyed by feature id and holding the
+    // version it advertised. Empty until its advertisement arrives, and empty
+    // forever for a client that predates feature negotiation -- which reads
+    // the same way and is the correct answer for both.
+    std::map<std::uint16_t, std::uint16_t> peer_features;
 
     struct {
       std::string ping_payload;
@@ -1036,6 +1044,109 @@ namespace stream {
         exec_thread.detach();
       } else {
         BOOST_LOG(error) << "Invalid server command index: " << (int)cmdIndex;
+      }
+    });
+
+    // Feature negotiation. Both ends send the same message, so this handler
+    // records what the client can do and answers with what Helios can do.
+    //
+    // Wire format, little-endian:
+    //   uint8 format version (1) | uint8 reserved | uint16 count
+    //   count x { uint16 featureId; uint16 featureVersion }
+    server->map(packetTypes[IDX_FEATURE_ADVERTISE], [server](session_t *session, const std::string_view &payload) {
+      constexpr std::uint8_t format_version = 1;
+      constexpr std::size_t header_size = 4;
+      constexpr std::size_t entry_size = 4;
+      // Bounded so a hostile count cannot make us allocate: the map is filled
+      // from what actually arrived, never from what the header claims.
+      constexpr std::size_t max_entries = 64;
+
+      if (payload.size() < header_size) {
+        BOOST_LOG(warning) << "Feature advertisement from ["sv << session->device_name << "] is too short"sv;
+        return;
+      }
+
+      auto bytes = reinterpret_cast<const std::uint8_t *>(payload.data());
+
+      if (bytes[0] != format_version) {
+        // Refusing to guess: a format we do not know leaves every feature
+        // reading as unsupported, which loses a feature rather than
+        // misinterpreting one.
+        BOOST_LOG(info) << "Ignoring feature advertisement in unknown format "sv << (int) bytes[0];
+        return;
+      }
+
+      std::uint16_t count = bytes[2] | (bytes[3] << 8);
+      std::size_t available = (payload.size() - header_size) / entry_size;
+
+      if (count > available) {
+        BOOST_LOG(warning) << "Feature advertisement claimed "sv << count
+                           << " entries but carried "sv << available;
+        count = (std::uint16_t) available;
+      }
+
+      session->peer_features.clear();
+      for (std::size_t i = 0; i < count && i < max_entries; ++i) {
+        auto off = header_size + i * entry_size;
+        std::uint16_t id = bytes[off] | (bytes[off + 1] << 8);
+        std::uint16_t version = bytes[off + 2] | (bytes[off + 3] << 8);
+        session->peer_features[id] = version;
+      }
+
+      BOOST_LOG(info) << "Client ["sv << session->device_name << "] advertised "sv
+                      << session->peer_features.size() << " feature(s)"sv;
+
+      // Answer with ours. Helios advertises nothing yet: the channel is in
+      // place and the passengers land on top of it, so an empty list here is
+      // the honest report rather than a placeholder.
+      static const std::vector<std::pair<std::uint16_t, std::uint16_t>> local_features = {};
+
+      // Fixed capacity rather than a vector: encode_control is a template over
+      // std::array, so the buffer size has to be a constant. Sized for the
+      // most features Helios could advertise, and only the used prefix is sent.
+      constexpr std::size_t max_local_features = 16;
+      constexpr std::size_t plaintext_capacity =
+        sizeof(control_header_v2) + header_size + max_local_features * entry_size;
+
+      if (local_features.size() > max_local_features) {
+        BOOST_LOG(error) << "More local features than the advertisement buffer holds"sv;
+        return;
+      }
+
+      std::array<std::uint8_t, plaintext_capacity> plaintext {};
+      std::size_t plaintext_used = sizeof(control_header_v2) + header_size + local_features.size() * entry_size;
+
+      auto header = reinterpret_cast<control_header_v2 *>(plaintext.data());
+      header->type = packetTypes[IDX_FEATURE_ADVERTISE];
+      header->payloadLength = (std::uint16_t) (plaintext_used - sizeof(control_header_v2));
+
+      auto body = plaintext.data() + sizeof(control_header_v2);
+      body[0] = format_version;
+      body[1] = 0;
+      body[2] = (std::uint8_t) (local_features.size() & 0xFF);
+      body[3] = (std::uint8_t) (local_features.size() >> 8);
+
+      for (std::size_t i = 0; i < local_features.size(); ++i) {
+        auto off = header_size + i * entry_size;
+        body[off] = (std::uint8_t) (local_features[i].first & 0xFF);
+        body[off + 1] = (std::uint8_t) (local_features[i].first >> 8);
+        body[off + 2] = (std::uint8_t) (local_features[i].second & 0xFF);
+        body[off + 3] = (std::uint8_t) (local_features[i].second >> 8);
+      }
+
+      if (!session->control.peer) {
+        return;
+      }
+
+      std::array<std::uint8_t,
+                 sizeof(control_encrypted_t) + crypto::cipher::round_to_pkcs7_padded(plaintext_capacity) + crypto::cipher::tag_size>
+        encrypted_payload;
+      auto encoded = encode_control(session,
+                                    std::string_view {(const char *) plaintext.data(), plaintext_used},
+                                    encrypted_payload);
+
+      if (server->send(encoded, session->control.peer)) {
+        BOOST_LOG(warning) << "Couldn't send the feature advertisement to ["sv << session->device_name << ']';
       }
     });
 
