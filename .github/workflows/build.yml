@@ -64,16 +64,31 @@ jobs:
           CC: gcc-${{ matrix.gcc }}
           CXX: g++-${{ matrix.gcc }}
         run: |
+          # CUDA_FAIL_ON_MISSING defaults to ON, so a runner without nvcc --
+          # which is every GitHub-hosted one -- fails at configure time rather
+          # than building without NVENC. Turning it off is not the same as
+          # SUNSHINE_ENABLE_CUDA=OFF: the CUDA sources still build wherever a
+          # toolkit is present, so adding one to this job later needs no
+          # change here.
+          #
+          # The cost is real and worth stating: src/platform/linux/cuda.{cu,cpp}
+          # are not compiled by CI. Installing the toolkit is a multi-GB
+          # download per run for code the fork does not touch, and a local
+          # build on a machine with CUDA does cover it.
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCUDA_FAIL_ON_MISSING=OFF \
             -DBUILD_TESTS=ON
 
       - name: Build
         run: cmake --build build -j"$(nproc)"
 
       # Two suites fail and one aborts the whole run, all inherited from Apollo
-      # and none caused by the fork. They are excluded so the remaining 69 tests
-      # actually gate, rather than the job being permanently red and ignored:
+      # and none caused by the fork. They are excluded so the rest actually
+      # gate, rather than the job being permanently red and ignored. Measured
+      # locally against this exclusion list: 73 run, 68 pass, 5 skip -- the
+      # skips are environment-dependent (no encoder, inputtino unimplemented),
+      # so expect the split to move a little on a runner, not the pass/fail:
       #
       #   ConfigConsistencyTest   - config options out of sync between files
       #   DisplayDeviceConfigTest - refresh-rate parsing and mode remapping
