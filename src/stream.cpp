@@ -59,6 +59,9 @@ extern "C" {
 #define IDX_FILE_TRANSFER_NONCE_REQUEST 17
 #define IDX_SET_ADAPTIVE_TRIGGERS 18
 #define IDX_FEATURE_ADVERTISE 19
+#define IDX_CLIPBOARD_OFFER 20
+#define IDX_CLIPBOARD_REQUEST 21
+#define IDX_CLIPBOARD_DATA 22
 
 static const short packetTypes[] = {
   0x0305,  // Start A
@@ -81,6 +84,9 @@ static const short packetTypes[] = {
   0x3002,  // File transfer nonce request (Helios protocol extension)
   0x5503,  // Set Adaptive triggers (Helios protocol extension)
   0x6000,  // Feature advertisement (Moonlight OS protocol extension)
+  0x6001,  // Clipboard offer (Moonlight OS protocol extension)
+  0x6002,  // Clipboard request (Moonlight OS protocol extension)
+  0x6003,  // Clipboard data (Moonlight OS protocol extension)
 };
 
 namespace asio = boost::asio;
@@ -375,6 +381,12 @@ namespace stream {
     // forever for a client that predates feature negotiation -- which reads
     // the same way and is the correct answer for both.
     std::map<std::uint16_t, std::uint16_t> peer_features;
+
+    // The clipboard offer this host has asked for and is still waiting on.
+    // Data arriving for any other sequence belongs to an offer that has since
+    // been replaced, and applying it would let a slow transfer overwrite a
+    // newer copy.
+    std::uint32_t clipboard_pending_seq = 0;
 
     struct {
       std::string ping_payload;
@@ -940,6 +952,203 @@ namespace stream {
     return 0;
   }
 
+  /**
+   * @brief Ask the client for the contents of a clipboard offer it made.
+   */
+  void send_clipboard_request(control_server_t *server, session_t *session, std::uint32_t seq, std::uint16_t format) {
+    if (!session->control.peer) {
+      return;
+    }
+
+    constexpr std::size_t body_size = 8;
+    std::array<std::uint8_t, sizeof(control_header_v2) + body_size> plaintext {};
+
+    auto header = reinterpret_cast<control_header_v2 *>(plaintext.data());
+    header->type = packetTypes[IDX_CLIPBOARD_REQUEST];
+    header->payloadLength = body_size;
+
+    auto body = plaintext.data() + sizeof(control_header_v2);
+    body[0] = (std::uint8_t) (seq & 0xFF);
+    body[1] = (std::uint8_t) ((seq >> 8) & 0xFF);
+    body[2] = (std::uint8_t) ((seq >> 16) & 0xFF);
+    body[3] = (std::uint8_t) ((seq >> 24) & 0xFF);
+    body[4] = (std::uint8_t) (format & 0xFF);
+    body[5] = (std::uint8_t) (format >> 8);
+
+    std::array<std::uint8_t, sizeof(control_encrypted_t) + crypto::cipher::round_to_pkcs7_padded(plaintext.size()) + crypto::cipher::tag_size>
+      encrypted_payload;
+    auto encoded = encode_control(session, std::string_view {(const char *) plaintext.data(), plaintext.size()}, encrypted_payload);
+
+    if (server->send(encoded, session->control.peer)) {
+      BOOST_LOG(warning) << "Couldn't request the clipboard from ["sv << session->device_name << ']';
+    }
+  }
+
+  /**
+   * @brief Answer a client's clipboard request.
+   *
+   * The buffers here are heap allocated, unlike every other control message in
+   * this file: a clipboard can legitimately be megabytes, and encode_control is
+   * a template over std::array, so the alternative would be putting the
+   * protocol's whole maximum on the stack for every send.
+   */
+  void send_clipboard_data(control_server_t *server, session_t *session, std::uint32_t seq, std::uint16_t format, const std::string &content) {
+    if (!session->control.peer) {
+      return;
+    }
+
+    constexpr std::size_t max_content = 4 * 1024 * 1024;  // ML_CLIPBOARD_MAX_BYTES
+    constexpr std::size_t header_size = 12;
+
+    if (content.size() > max_content) {
+      BOOST_LOG(warning) << "Refusing to send a "sv << content.size() << " byte clipboard"sv;
+      return;
+    }
+
+    auto plaintext_size = sizeof(control_header_v2) + header_size + content.size();
+    auto plaintext = std::make_unique<std::uint8_t[]>(plaintext_size);
+
+    auto header = reinterpret_cast<control_header_v2 *>(plaintext.get());
+    header->type = packetTypes[IDX_CLIPBOARD_DATA];
+    header->payloadLength = (std::uint16_t) (header_size + content.size());
+
+    auto body = plaintext.get() + sizeof(control_header_v2);
+    auto put32 = [](std::uint8_t *at, std::uint32_t v) {
+      at[0] = (std::uint8_t) (v & 0xFF);
+      at[1] = (std::uint8_t) ((v >> 8) & 0xFF);
+      at[2] = (std::uint8_t) ((v >> 16) & 0xFF);
+      at[3] = (std::uint8_t) ((v >> 24) & 0xFF);
+    };
+
+    put32(body, seq);
+    body[4] = (std::uint8_t) (format & 0xFF);
+    body[5] = (std::uint8_t) (format >> 8);
+    body[6] = 0;
+    body[7] = 0;
+    put32(body + 8, (std::uint32_t) content.size());
+    std::memcpy(body + header_size, content.data(), content.size());
+
+    using clipboard_buffer_t = std::array<std::uint8_t,
+                                          sizeof(control_encrypted_t) +
+                                            crypto::cipher::round_to_pkcs7_padded(sizeof(control_header_v2) + header_size + max_content) +
+                                            crypto::cipher::tag_size>;
+    auto encrypted_payload = std::make_unique<clipboard_buffer_t>();
+    auto encoded = encode_control(session, std::string_view {(const char *) plaintext.get(), plaintext_size}, *encrypted_payload);
+
+    if (server->send(encoded, session->control.peer)) {
+      BOOST_LOG(warning) << "Couldn't send the clipboard to ["sv << session->device_name << ']';
+    }
+    else {
+      BOOST_LOG(info) << "Sent "sv << content.size() << " clipboard bytes to ["sv << session->device_name << ']';
+    }
+  }
+
+  /**
+   * @brief The host clipboard as we last saw it, and the sequence to label the next offer with.
+   *
+   * Host-wide rather than per session, because the clipboard is: two clients
+   * watching the same desktop are looking at one selection.
+   *
+   * This is also half of the loop prevention. When a client's text is applied
+   * here, it is recorded as already seen, so the watcher below does not notice
+   * it as a fresh local copy and offer it straight back to the client it came
+   * from. The client keeps the matching guard on its own side.
+   */
+  std::string last_seen_clipboard;
+  std::uint32_t clipboard_offer_seq = 0;
+
+  /**
+   * @brief Tell a client that the host clipboard changed, without sending it.
+   */
+  void send_clipboard_offer(control_server_t *server, session_t *session, std::uint32_t seq, std::uint32_t size_hint) {
+    if (!session->control.peer) {
+      return;
+    }
+
+    constexpr std::size_t body_size = 8 + 6;  // header + one format entry
+    std::array<std::uint8_t, sizeof(control_header_v2) + body_size> plaintext {};
+
+    auto header = reinterpret_cast<control_header_v2 *>(plaintext.data());
+    header->type = packetTypes[IDX_CLIPBOARD_OFFER];
+    header->payloadLength = body_size;
+
+    auto body = plaintext.data() + sizeof(control_header_v2);
+    auto put32 = [](std::uint8_t *at, std::uint32_t v) {
+      at[0] = (std::uint8_t) (v & 0xFF);
+      at[1] = (std::uint8_t) ((v >> 8) & 0xFF);
+      at[2] = (std::uint8_t) ((v >> 16) & 0xFF);
+      at[3] = (std::uint8_t) ((v >> 24) & 0xFF);
+    };
+
+    put32(body, seq);
+    body[4] = 1;  // one format
+    body[5] = 0;
+    body[6] = 0;
+    body[7] = 0;
+    body[8] = (std::uint8_t) (ML_CLIPBOARD_FORMAT_TEXT_UTF8 & 0xFF);
+    body[9] = (std::uint8_t) (ML_CLIPBOARD_FORMAT_TEXT_UTF8 >> 8);
+    put32(body + 10, size_hint);
+
+    std::array<std::uint8_t, sizeof(control_encrypted_t) + crypto::cipher::round_to_pkcs7_padded(plaintext.size()) + crypto::cipher::tag_size>
+      encrypted_payload;
+    auto encoded = encode_control(session, std::string_view {(const char *) plaintext.data(), plaintext.size()}, encrypted_payload);
+
+    if (server->send(encoded, session->control.peer)) {
+      BOOST_LOG(warning) << "Couldn't offer the clipboard to ["sv << session->device_name << ']';
+    }
+  }
+
+  /**
+   * @brief Notice a copy made on the host and offer it to every client that can take it.
+   *
+   * Polled, because there is no portable way to be told: reading the selection
+   * means asking the compositor, and wl-paste has no "notify me" that survives
+   * not being a session client. One second is chosen to keep that round trip
+   * off the 150ms control tick -- a clipboard is not latency sensitive.
+   */
+  void poll_host_clipboard(control_server_t *server) {
+    static auto last_poll = std::chrono::steady_clock::now();
+
+    auto now = std::chrono::steady_clock::now();
+    if (now - last_poll < std::chrono::seconds(1)) {
+      return;
+    }
+    last_poll = now;
+
+    // Only pay for the read if somebody is listening for the answer.
+    bool anyone_wants_it = false;
+    for (auto pos = std::begin(*server->_sessions); pos != std::end(*server->_sessions); ++pos) {
+      auto session = *pos;
+      if (session->control.peer &&
+          session->peer_features.count(ML_FEATURE_CLIPBOARD) &&
+          !!(session->permission & crypto::PERM::clipboard_read)) {
+        anyone_wants_it = true;
+        break;
+      }
+    }
+
+    if (!anyone_wants_it) {
+      return;
+    }
+
+    auto content = platf::get_clipboard();
+    if (content.empty() || content == last_seen_clipboard) {
+      return;
+    }
+
+    last_seen_clipboard = content;
+    ++clipboard_offer_seq;
+
+    for (auto pos = std::begin(*server->_sessions); pos != std::end(*server->_sessions); ++pos) {
+      auto session = *pos;
+      if (session->control.peer &&
+          session->peer_features.count(ML_FEATURE_CLIPBOARD) &&
+          !!(session->permission & crypto::PERM::clipboard_read)) {
+        send_clipboard_offer(server, session, clipboard_offer_seq, (std::uint32_t) content.size());
+      }
+    }
+  }
+
   void controlBroadcastThread(control_server_t *server) {
     server->map(packetTypes[IDX_PERIODIC_PING], [](session_t *session, const std::string_view &payload) {
       BOOST_LOG(verbose) << "type [IDX_PERIODIC_PING]"sv;
@@ -1099,7 +1308,9 @@ namespace stream {
       // Answer with ours. Helios advertises nothing yet: the channel is in
       // place and the passengers land on top of it, so an empty list here is
       // the honest report rather than a placeholder.
-      static const std::vector<std::pair<std::uint16_t, std::uint16_t>> local_features = {};
+      static const std::vector<std::pair<std::uint16_t, std::uint16_t>> local_features = {
+        {ML_FEATURE_CLIPBOARD, 1},
+      };
 
       // Fixed capacity rather than a vector: encode_control is a template over
       // std::array, so the buffer size has to be a constant. Sized for the
@@ -1148,6 +1359,117 @@ namespace stream {
       if (server->send(encoded, session->control.peer)) {
         BOOST_LOG(warning) << "Couldn't send the feature advertisement to ["sv << session->device_name << ']';
       }
+    });
+
+    // Clipboard, advertise-then-fetch. The client says what it has; nothing
+    // crosses until something here actually pastes.
+    server->map(packetTypes[IDX_CLIPBOARD_OFFER], [server](session_t *session, const std::string_view &payload) {
+      if (!(session->permission & crypto::PERM::clipboard_set)) {
+        BOOST_LOG(debug) << "Permission Clipboard Set denied for ["sv << session->device_name << ']';
+        return;
+      }
+
+      if (payload.size() < 8) {
+        BOOST_LOG(warning) << "Clipboard offer from ["sv << session->device_name << "] is too short"sv;
+        return;
+      }
+
+      auto bytes = reinterpret_cast<const std::uint8_t *>(payload.data());
+      std::uint32_t seq = bytes[0] | (bytes[1] << 8) | (bytes[2] << 16) | ((std::uint32_t) bytes[3] << 24);
+      std::uint16_t count = bytes[4] | (bytes[5] << 8);
+
+      bool has_text = false;
+      std::size_t entries = std::min<std::size_t>(count, (payload.size() - 8) / 6);
+      for (std::size_t i = 0; i < entries; ++i) {
+        auto off = 8 + i * 6;
+        std::uint16_t format = bytes[off] | (bytes[off + 1] << 8);
+        if (format == ML_CLIPBOARD_FORMAT_TEXT_UTF8) {
+          has_text = true;
+        }
+      }
+
+      if (!has_text) {
+        // Only text is implemented, and an offer without it is not an error --
+        // the client copied an image and this host cannot take it yet.
+        BOOST_LOG(debug) << "Clipboard offer "sv << seq << " has no format we take"sv;
+        return;
+      }
+
+      // Fetch immediately rather than on a real paste. This is the honest
+      // shape of it: X11 and Wayland want an owner that can answer at any
+      // moment, and Helios is not a session client that can hold a selection,
+      // so it has to have the bytes in hand before it can put them anywhere.
+      // The laziness that matters is still preserved -- the client sends
+      // nothing until asked, which is where the privacy cost lives.
+      session->clipboard_pending_seq = seq;
+      send_clipboard_request(server, session, seq, ML_CLIPBOARD_FORMAT_TEXT_UTF8);
+    });
+
+    server->map(packetTypes[IDX_CLIPBOARD_DATA], [server](session_t *session, const std::string_view &payload) {
+      if (!(session->permission & crypto::PERM::clipboard_set)) {
+        BOOST_LOG(debug) << "Permission Clipboard Set denied for ["sv << session->device_name << ']';
+        return;
+      }
+
+      if (payload.size() < 12) {
+        BOOST_LOG(warning) << "Clipboard data from ["sv << session->device_name << "] is too short"sv;
+        return;
+      }
+
+      auto bytes = reinterpret_cast<const std::uint8_t *>(payload.data());
+      std::uint32_t seq = bytes[0] | (bytes[1] << 8) | (bytes[2] << 16) | ((std::uint32_t) bytes[3] << 24);
+      std::uint16_t format = bytes[4] | (bytes[5] << 8);
+      std::uint32_t length = bytes[8] | (bytes[9] << 8) | (bytes[10] << 16) | ((std::uint32_t) bytes[11] << 24);
+
+      if (length > payload.size() - 12) {
+        BOOST_LOG(warning) << "Clipboard data claimed "sv << length << " bytes but carried "sv << (payload.size() - 12);
+        return;
+      }
+
+      // A reply to an offer we have already replaced. Dropping it is what
+      // stops an older, slower transfer from overwriting a newer copy.
+      if (seq != session->clipboard_pending_seq) {
+        BOOST_LOG(debug) << "Ignoring clipboard data for superseded offer "sv << seq;
+        return;
+      }
+
+      if (format != ML_CLIPBOARD_FORMAT_TEXT_UTF8) {
+        return;
+      }
+
+      auto content = std::string {payload.data() + 12, length};
+      if (platf::set_clipboard(content)) {
+        // Mark it as already seen, or the watcher notices the host clipboard
+        // change one second later and offers the client its own text back.
+        last_seen_clipboard = content;
+        BOOST_LOG(info) << "Clipboard updated from ["sv << session->device_name << "], "sv << length << " bytes"sv;
+      }
+    });
+
+    server->map(packetTypes[IDX_CLIPBOARD_REQUEST], [server](session_t *session, const std::string_view &payload) {
+      if (!(session->permission & crypto::PERM::clipboard_read)) {
+        BOOST_LOG(debug) << "Permission Clipboard Read denied for ["sv << session->device_name << ']';
+        return;
+      }
+
+      if (payload.size() < 8) {
+        return;
+      }
+
+      auto bytes = reinterpret_cast<const std::uint8_t *>(payload.data());
+      std::uint32_t seq = bytes[0] | (bytes[1] << 8) | (bytes[2] << 16) | ((std::uint32_t) bytes[3] << 24);
+      std::uint16_t format = bytes[4] | (bytes[5] << 8);
+
+      if (format != ML_CLIPBOARD_FORMAT_TEXT_UTF8) {
+        return;
+      }
+
+      auto content = platf::get_clipboard();
+      if (content.empty()) {
+        return;
+      }
+
+      send_clipboard_data(server, session, seq, format, content);
     });
 
     server->map(packetTypes[IDX_SET_CLIPBOARD], [server](session_t *session, const std::string_view &payload) {
@@ -1249,6 +1571,10 @@ namespace stream {
         auto lg = server->_sessions.lock();
 
         auto now = std::chrono::steady_clock::now();
+
+        // Under the same lock as the session walk below, since it reads the
+        // session list and sends on their peers.
+        poll_host_clipboard(server);
 
         KITTY_WHILE_LOOP(auto pos = std::begin(*server->_sessions), pos != std::end(*server->_sessions), {
           // Don't perform additional session processing if we're shutting down
