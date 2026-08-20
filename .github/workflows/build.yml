@@ -2,12 +2,15 @@
 name: Build
 
 # Apollo shipped no workflows at all, so this is written from scratch rather
-# than inherited. The dependency list is taken from scripts/linux_build.sh
-# (add_debian_based_deps + add_ubuntu_deps) rather than hand-written, so there
-# is one source of truth for what Helios needs to build.
+# than inherited. Neither dependency list is hand-written: Linux takes its
+# packages from scripts/linux_build.sh (add_debian_based_deps + add_ubuntu_deps)
+# and Windows takes its MSYS2 packages from docs/building.md, so in both cases
+# there is one source of truth for what Helios needs to build. If you change
+# what a build needs, change it there first.
 #
-# Note Helios vendors Boost and FFmpeg via third-party/build-deps, so the
-# system -dev packages for those are deliberately absent.
+# Note Linux vendors Boost and FFmpeg via third-party/build-deps, so the system
+# -dev packages for those are deliberately absent. Windows vendors FFmpeg the
+# same way but does install Boost -- see the comment on that job.
 
 permissions:
   contents: read
@@ -112,4 +115,134 @@ jobs:
           name: helios-${{ matrix.os }}
           path: build/helios
           if-no-files-found: warn
+          retention-days: 7
+
+  build-windows:
+    name: Windows (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # Longer than Linux on purpose: this job links everything statically and
+    # builds Boost from source (see the pacboy comment), then packages on top.
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2025
+
+    defaults:
+      run:
+        # Every run step is MSYS2's UCRT64 shell, which is the same environment
+        # docs/building.md tells a human to build in, so CI and a local Windows
+        # build cannot quietly drift apart. Steps that are `uses:` are
+        # unaffected, which is why the two setup actions below still work.
+        shell: msys2 {0}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Same two reasons as the Linux job: lunaris is a submodule, and
+          # cmake/prep/build_version.cmake shells out to git describe.
+          submodules: recursive
+          fetch-depth: 0
+
+      # The official MSVC-built Node, deliberately *not* MSYS2's
+      # mingw-w64-ucrt-x86_64-nodejs: that one is linked against the MSYS2
+      # gcc-16 libstdc++, whose std::bad_weak_ptr regression crashes node
+      # during process init. docs/building.md spells this out for humans.
+      # It has to come before setup-msys2 so node.exe is on the PATH the
+      # MSYS2 shell inherits.
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ucrt64
+          update: true
+          cache: true
+          # cmake/targets/common.cmake does find_program(NPM npm REQUIRED), and
+          # the only npm on this machine is the Windows one installed above, so
+          # the shell has to inherit the Windows PATH. MSYS2's own directories
+          # still come first, so the UCRT64 cmake/gcc/git win over whatever the
+          # runner image ships.
+          path-type: inherit
+          install: >-
+            git
+          # Mirrors the dependency list in docs/building.md, minus the ones it
+          # marks optional (doxygen and graphviz, which only build the docs)
+          # and minus boost. Two notes:
+          #
+          #   ninja  - the build command is `-G Ninja` and the toolchain group
+          #            does not ship it; the docs list omits it because a
+          #            developer machine usually already has one.
+          #   boost  - deliberately absent, not an oversight.
+          #            cmake/dependencies/Boost_Helios.cmake asks for EXACT
+          #            1.89.0 and MSYS2 is on 1.91.0, so the system package
+          #            cannot satisfy the find and FetchContent builds Boost
+          #            from source regardless. Installing it would cost a
+          #            large download for nothing. This is the same bargain
+          #            the Linux job makes. If the pin ever moves to whatever
+          #            MSYS2 ships, add boost:p here and the run gets faster.
+          pacboy: >-
+            cmake:p
+            cppwinrt:p
+            curl-winssl:p
+            MinHook:p
+            miniupnpc:p
+            ninja:p
+            nlohmann_json:p
+            nsis:p
+            onevpl:p
+            openssl:p
+            opus:p
+            toolchain:p
+
+      - name: Configure
+        # No CUDA_FAIL_ON_MISSING here, unlike the Linux job: the CUDA options
+        # are only declared under UNIX, and Windows reaches NVENC through the
+        # prebuilt FFmpeg in third-party/build-deps instead.
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+
+      # Same three exclusions as the Linux job, for the same reason: all three
+      # are inherited from Apollo and none are fork-caused. Expect a different
+      # pass/skip split than Linux's 68/5, since more of the suite depends on
+      # the environment here and the runner has no GPU capture path. A failure
+      # is still a real regression, so do not extend this filter to turn a red
+      # build green.
+      - name: Test
+        working-directory: build/tests
+        run: >
+          ./test_helios.exe --gtest_color=yes
+          --gtest_filter=-ConfigConsistencyTest.*:DisplayDeviceConfigTest/*:*PairingTest*
+
+      # The bare .exe is not much use on its own -- it needs the assets, the
+      # tools, the service and the drivers next to it -- so CI produces the
+      # same NSIS installer a release would. CPACK_PACKAGE_DIRECTORY puts the
+      # result in build/cpack_artifacts.
+      - name: Package
+        run: cpack -G NSIS --config ./build/CPackConfig.cmake
+
+      - name: Upload the binary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: helios-${{ matrix.os }}
+          path: build/helios.exe
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload the installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: helios-${{ matrix.os }}-installer
+          path: build/cpack_artifacts/*.exe
+          if-no-files-found: error
           retention-days: 7

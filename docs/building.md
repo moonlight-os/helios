@@ -94,7 +94,7 @@ pacman -Syu
 ```bash
 dependencies=(
   "git"
-  "mingw-w64-ucrt-x86_64-boost"  # Optional
+  "mingw-w64-ucrt-x86_64-boost"  # Optional, and currently pointless: the find is EXACT 1.89.0, MSYS2 ships 1.91.0
   "mingw-w64-ucrt-x86_64-cmake"
   "mingw-w64-ucrt-x86_64-cppwinrt"
   "mingw-w64-ucrt-x86_64-curl-winssl"
@@ -102,6 +102,7 @@ dependencies=(
   "mingw-w64-ucrt-x86_64-graphviz"  # Optional, for docs
   "mingw-w64-ucrt-x86_64-MinHook"
   "mingw-w64-ucrt-x86_64-miniupnpc"
+  "mingw-w64-ucrt-x86_64-ninja"  # The build below uses -G Ninja; the toolchain group does not include it
   "mingw-w64-ucrt-x86_64-nsis"
   "mingw-w64-ucrt-x86_64-onevpl"
   "mingw-w64-ucrt-x86_64-openssl"
