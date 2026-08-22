@@ -1,4 +1,4 @@
-# Edit on github: https://github.com/LizardByte/Sunshine/blob/master/packaging/linux/Arch/PKGBUILD
+# Edit on GitHub: https://github.com/moonlight-os/helios/blob/main/packaging/linux/Arch/PKGBUILD
 # Reference: https://wiki.archlinux.org/title/PKGBUILD
 
 ## options
@@ -38,8 +38,10 @@ depends=(
   'miniupnpc'
   'numactl'
   'openssl'
+  'open-iscsi'
   'opus'
   'udev'
+  'usbip'
   'which'
 )
 
@@ -122,7 +124,7 @@ build() {
       -D CMAKE_INSTALL_PREFIX=/usr
       -D SUNSHINE_EXECUTABLE_PATH=/usr/bin/helios
       -D SUNSHINE_ASSETS_DIR="share/helios"
-      -D SUNSHINE_PUBLISHER_NAME='LizardByte'
+      -D SUNSHINE_PUBLISHER_NAME='Moonlight OS'
       -D SUNSHINE_PUBLISHER_WEBSITE='https://app.lizardbyte.dev'
       -D SUNSHINE_PUBLISHER_ISSUE_URL='https://app.lizardbyte.dev/support'
     )

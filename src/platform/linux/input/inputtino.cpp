@@ -111,6 +111,8 @@ namespace platf {
 
   platform_caps::caps_t get_capabilities() {
     platform_caps::caps_t caps = 0;
+    caps |= platform_caps::microphone_uplink;
+    if (virtual_camera_available()) caps |= platform_caps::camera_uplink;
     // TODO: if has_uinput
     caps |= platform_caps::pen_touch;
 

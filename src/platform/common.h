@@ -280,6 +280,8 @@ namespace platf {
 
     constexpr caps_t pen_touch = 0x01;  // Pen and touch events
     constexpr caps_t controller_touch = 0x02;  // Controller touch events
+    constexpr caps_t microphone_uplink = 0x04;  // Authenticated Opus client microphone
+    constexpr caps_t camera_uplink = 0x08;  // Authenticated MJPEG client camera
   };  // namespace platform_caps
 
   struct gamepad_state_t {
@@ -552,6 +554,46 @@ namespace platf {
     virtual ~mic_t() = default;
   };
 
+  // A host-side virtual capture source. Microphone uplink audio is decoded to
+  // 48 kHz mono float PCM before it reaches this interface; platform backends
+  // publish it as a microphone that normal host applications can select.
+  class virtual_microphone_t {
+  public:
+    virtual bool write(const float *samples, std::size_t frame_count) = 0;
+    virtual ~virtual_microphone_t() = default;
+  };
+
+  // A host-side virtual video capture source. Camera uplink frames arrive as
+  // bounded MJPEG images and are published to normal host applications.
+  class virtual_camera_t {
+  public:
+    virtual bool write_mjpeg(const std::uint8_t *bytes, std::size_t size,
+                             std::uint16_t width, std::uint16_t height,
+                             std::uint32_t timestamp_ms) = 0;
+    virtual ~virtual_camera_t() = default;
+  };
+
+  struct client_display_t {
+    std::int32_t x;
+    std::int32_t y;
+    std::uint32_t width;
+    std::uint32_t height;
+    std::uint32_t refresh_millihz;
+    std::uint32_t scale_milli;
+    bool primary;
+    bool hdr;
+  };
+
+  // Materialises a client's declarative monitor set as host virtual outputs.
+  // Implementations own only outputs they create and withdraw them at session
+  // teardown; they never rearrange or disable the host's physical displays.
+  class virtual_display_topology_t {
+  public:
+    virtual bool apply(const std::vector<client_display_t> &displays) = 0;
+    virtual std::vector<std::string> display_names() const = 0;
+    virtual ~virtual_display_topology_t() = default;
+  };
+
   class audio_control_t {
   public:
     virtual int set_sink(const std::string &sink) = 0;
@@ -584,6 +626,12 @@ namespace platf {
   std::pair<std::uint16_t, std::string> from_sockaddr_ex(const sockaddr *const);
 
   std::unique_ptr<audio_control_t> audio_control();
+
+  std::unique_ptr<virtual_microphone_t> virtual_microphone();
+  std::unique_ptr<virtual_camera_t> virtual_camera();
+  bool virtual_camera_available();
+  bool virtual_display_topology_available();
+  std::unique_ptr<virtual_display_topology_t> virtual_display_topology();
 
   /**
    * @brief Get the display_t instance for the given hwdevice_type.

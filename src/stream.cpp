@@ -4,13 +4,19 @@
  */
 
 // standard includes
+#include <algorithm>
+#include <condition_variable>
+#include <deque>
 #include <fstream>
 #include <future>
+#include <mutex>
 #include <queue>
+#include <set>
 
 // lib includes
 #include <boost/endian/arithmetic.hpp>
 #include <openssl/err.h>
+#include <opus/opus.h>
 
 extern "C" {
   // clang-format off
@@ -35,6 +41,7 @@ extern "C" {
 #include "platform/common.h"
 #include "process.h"
 #include "stream.h"
+#include "usb_backend.h"
 #include "sync.h"
 #include "system_tray.h"
 #include "thread_safe.h"
@@ -63,6 +70,15 @@ extern "C" {
 #define IDX_CLIPBOARD_REQUEST 21
 #define IDX_CLIPBOARD_DATA 22
 #define IDX_KEYBOARD_LAYOUT 23
+#define IDX_USB_DEVICE_SYNC 24
+#define IDX_USB_TUNNEL_OPEN 25
+#define IDX_USB_TUNNEL_DATA 26
+#define IDX_USB_TUNNEL_CLOSE 27
+#define IDX_DISPLAY_TOPOLOGY 28
+#define IDX_SYSTEM_DISK_OFFER 29
+#define IDX_DISK_TUNNEL_OPEN 30
+#define IDX_DISK_TUNNEL_DATA 31
+#define IDX_DISK_TUNNEL_CLOSE 32
 
 static const short packetTypes[] = {
   0x0305,  // Start A
@@ -89,6 +105,15 @@ static const short packetTypes[] = {
   0x6002,  // Clipboard request (Moonlight OS protocol extension)
   0x6003,  // Clipboard data (Moonlight OS protocol extension)
   0x6004,  // Keyboard layout (Moonlight OS protocol extension)
+  0x6005,  // USB device sync (Moonlight OS protocol extension)
+  0x6006,  // USB tunnel open (Moonlight OS protocol extension)
+  0x6007,  // USB tunnel data (Moonlight OS protocol extension)
+  0x6008,  // USB tunnel close (Moonlight OS protocol extension)
+  0x6009,  // Display topology (Moonlight OS protocol extension)
+  0x600a,  // Read-only system disk offer (Moonlight OS protocol extension)
+  0x600b,  // System disk tunnel open (Moonlight OS protocol extension)
+  0x600c,  // System disk tunnel data (Moonlight OS protocol extension)
+  0x600d,  // System disk tunnel close (Moonlight OS protocol extension)
 };
 
 namespace asio = boost::asio;
@@ -100,6 +125,346 @@ using asio::ip::udp;
 using namespace std::literals;
 
 namespace stream {
+
+  constexpr std::uint32_t microphone_packet_magic = 0x4D4C4D43u;
+  constexpr std::size_t microphone_packet_header_size = 36;
+  constexpr std::size_t microphone_max_opus_size = 1200;
+  constexpr std::uint32_t camera_packet_magic = 0x4D4C4341u;
+  constexpr std::size_t camera_packet_header_size = 36;
+  constexpr std::size_t camera_fragment_header_size = 26;
+  constexpr std::size_t camera_fragment_data_size = 1050;
+  constexpr std::size_t camera_max_frame_size = 4 * 1024 * 1024;
+  constexpr std::size_t display_topology_header_size = 8;
+  constexpr std::size_t display_topology_entry_size = 32;
+  constexpr std::size_t display_topology_max_displays = 16;
+
+  static std::uint16_t read_be16(const std::uint8_t *bytes) {
+    return (std::uint16_t) ((bytes[0] << 8) | bytes[1]);
+  }
+
+  static std::uint32_t read_be32(const std::uint8_t *bytes) {
+    return ((std::uint32_t) bytes[0] << 24) | ((std::uint32_t) bytes[1] << 16) |
+           ((std::uint32_t) bytes[2] << 8) | bytes[3];
+  }
+
+  static std::uint64_t read_be64(const std::uint8_t *bytes) {
+    return ((std::uint64_t) read_be32(bytes) << 32) | read_be32(bytes + 4);
+  }
+
+  static std::uint16_t read_le16(const std::uint8_t *bytes) {
+    return (std::uint16_t) (bytes[0] | ((std::uint16_t) bytes[1] << 8));
+  }
+
+  static std::uint32_t read_le32(const std::uint8_t *bytes) {
+    return (std::uint32_t) bytes[0] | ((std::uint32_t) bytes[1] << 8) |
+           ((std::uint32_t) bytes[2] << 16) | ((std::uint32_t) bytes[3] << 24);
+  }
+
+  static std::uint64_t read_le64(const std::uint8_t *bytes) {
+    return (std::uint64_t) read_le32(bytes) | ((std::uint64_t) read_le32(bytes + 4) << 32);
+  }
+
+  bool parse_display_topology(std::string_view payload,
+                              std::uint32_t &generation,
+                              std::vector<display_desc_t> &displays) {
+    if (payload.size() < display_topology_header_size) return false;
+    auto bytes = reinterpret_cast<const std::uint8_t *>(payload.data());
+    if (bytes[0] != 1 || bytes[1] != 0) return false;
+    std::uint16_t count = read_le16(bytes + 2);
+    if (count == 0 || count > display_topology_max_displays ||
+        payload.size() != display_topology_header_size + count * display_topology_entry_size) {
+      return false;
+    }
+    std::vector<display_desc_t> parsed;
+    parsed.reserve(count);
+    std::size_t primary_count = 0;
+    for (std::size_t i = 0; i < count; ++i) {
+      auto p = bytes + display_topology_header_size + i * display_topology_entry_size;
+      display_desc_t display;
+      display.x = (std::int32_t) read_le32(p);
+      display.y = (std::int32_t) read_le32(p + 4);
+      display.width = read_le32(p + 8);
+      display.height = read_le32(p + 12);
+      display.refresh_millihz = read_le32(p + 16);
+      display.scale_milli = read_le32(p + 20);
+      display.physical_width_mm = read_le16(p + 24);
+      display.physical_height_mm = read_le16(p + 26);
+      display.flags = read_le16(p + 28);
+      auto reserved = read_le16(p + 30);
+      if (display.width == 0 || display.height == 0 ||
+          display.x < -131072 || display.x > 131072 ||
+          display.y < -131072 || display.y > 131072 ||
+          display.width > 16384 || display.height > 16384 ||
+          display.refresh_millihz < 1000 || display.refresh_millihz > 1000000 ||
+          display.scale_milli < 250 || display.scale_milli > 8000 ||
+          (display.flags & ~std::uint16_t {0x0003}) != 0 || reserved != 0) {
+        return false;
+      }
+      if (display.flags & 0x0001) ++primary_count;
+      parsed.push_back(display);
+    }
+    if (primary_count != 1) return false;
+    generation = read_le32(bytes + 4);
+    displays = std::move(parsed);
+    return true;
+  }
+
+  bool parse_system_disk_offer(std::string_view payload,
+                               system_disk_offer_t &offer) {
+    constexpr std::size_t header_size = 20;
+    constexpr std::size_t max_iqn_size = 223;
+    if (payload.size() < header_size) return false;
+
+    auto bytes = reinterpret_cast<const std::uint8_t *>(payload.data());
+    auto flags = bytes[1];
+    auto iqn_size = read_le16(bytes + 2);
+    if (bytes[0] != 1 || iqn_size > max_iqn_size ||
+        payload.size() != header_size + iqn_size) {
+      return false;
+    }
+
+    system_disk_offer_t parsed;
+    parsed.generation = read_le32(bytes + 4);
+    parsed.size = read_le64(bytes + 8);
+    parsed.sector_size = read_le32(bytes + 16);
+
+    if (iqn_size == 0) {
+      if (flags != 0 || parsed.size != 0 || parsed.sector_size != 0) return false;
+    } else {
+      if (flags != 0x01 || parsed.size == 0 ||
+          (parsed.sector_size != 512 && parsed.sector_size != 4096) ||
+          parsed.size % parsed.sector_size != 0) {
+        return false;
+      }
+      parsed.target_iqn.assign(payload.data() + header_size, iqn_size);
+      if (!parsed.target_iqn.starts_with("iqn.") ||
+          !std::all_of(parsed.target_iqn.begin(), parsed.target_iqn.end(), [](unsigned char ch) {
+            return (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') ||
+                   ch == '.' || ch == '-' || ch == ':';
+          })) {
+        return false;
+      }
+    }
+
+    offer = std::move(parsed);
+    return true;
+  }
+
+  std::optional<std::string> select_display_output(
+    const std::vector<std::string> &output_names,
+    std::uint16_t display_index) {
+    if (display_index >= output_names.size() || output_names[display_index].empty()) {
+      return std::nullopt;
+    }
+    return output_names[display_index];
+  }
+
+  bool parse_feature_advertisement(
+    std::string_view payload,
+    std::map<std::uint16_t, std::uint16_t> &features) {
+    constexpr std::size_t header_size = 4;
+    constexpr std::size_t entry_size = 4;
+    constexpr std::size_t max_entries = 64;
+    if (payload.size() < header_size) return false;
+    auto bytes = reinterpret_cast<const std::uint8_t *>(payload.data());
+    auto count = (std::uint16_t) (bytes[2] | ((std::uint16_t) bytes[3] << 8));
+    if (bytes[0] != 1 || bytes[1] != 0 || count > max_entries ||
+        payload.size() != header_size + count * entry_size) {
+      return false;
+    }
+    std::map<std::uint16_t, std::uint16_t> parsed;
+    for (std::size_t i = 0; i < count; ++i) {
+      auto off = header_size + i * entry_size;
+      auto id = (std::uint16_t) (bytes[off] | ((std::uint16_t) bytes[off + 1] << 8));
+      auto version = (std::uint16_t) (bytes[off + 2] | ((std::uint16_t) bytes[off + 3] << 8));
+      if (id == 0 || version == 0 || !parsed.emplace(id, version).second) return false;
+    }
+    features = std::move(parsed);
+    return true;
+  }
+
+  std::map<std::uint16_t, std::uint16_t> negotiate_features(
+    const std::map<std::uint16_t, std::uint16_t> &advertised,
+    const std::map<std::uint16_t, std::uint16_t> &supported) {
+    std::map<std::uint16_t, std::uint16_t> negotiated;
+    for (const auto &[id, version] : advertised) {
+      auto local = supported.find(id);
+      if (local != supported.end() && local->second == version) {
+        negotiated.emplace(id, version);
+      }
+    }
+    return negotiated;
+  }
+
+  std::map<std::uint16_t, std::uint16_t> host_supported_features(
+    bool virtual_camera_available,
+    bool virtual_display_topology_available) {
+    std::map<std::uint16_t, std::uint16_t> features {
+      {ML_FEATURE_CLIPBOARD, 1},
+      {ML_FEATURE_KEYBOARD_LAYOUT, 1},
+      {ML_FEATURE_USB_PASSTHROUGH, 1},
+      {ML_FEATURE_MICROPHONE, 1},
+      {ML_FEATURE_SYSTEM_DISK, 1},
+    };
+    if (virtual_camera_available) {
+      features.emplace(ML_FEATURE_CAMERA, 1);
+    }
+    if (virtual_display_topology_available) {
+      features.emplace(ML_FEATURE_DISPLAY_TOPOLOGY, 1);
+    }
+    return features;
+  }
+
+  bool decode_microphone_packet(std::string_view payload,
+                                crypto::cipher::gcm_t &cipher,
+                                microphone_packet_t &packet) {
+    if (payload.size() < microphone_packet_header_size + 8 ||
+        payload.size() > microphone_packet_header_size + 8 + microphone_max_opus_size) {
+      return false;
+    }
+    auto bytes = reinterpret_cast<const std::uint8_t *>(payload.data());
+    if (read_be32(bytes) != microphone_packet_magic || bytes[4] != 1 || bytes[5] != 0 ||
+        read_be16(bytes + 6) != payload.size()) {
+      return false;
+    }
+
+    microphone_packet_t decoded;
+    decoded.connect_data = read_be32(bytes + 8);
+    decoded.sequence = read_be64(bytes + 12);
+    crypto::aes_t iv(12, 0);
+    for (int i = 0; i < 8; ++i) {
+      iv[i] = bytes[12 + i];
+    }
+    iv[10] = 'M';
+    iv[11] = 'C';
+
+    std::vector<std::uint8_t> plaintext;
+    if (cipher.decrypt(payload.substr(20), plaintext, &iv) < 0 ||
+        plaintext.size() < 9 || plaintext.size() > 8 + microphone_max_opus_size) {
+      return false;
+    }
+    decoded.timestamp = read_be32(plaintext.data());
+    decoded.samples = read_be16(plaintext.data() + 4);
+    decoded.channels = plaintext[6];
+    if (plaintext[7] != 0 || decoded.samples < 120 || decoded.samples > 5760 ||
+        (decoded.channels != 1 && decoded.channels != 2)) {
+      return false;
+    }
+    decoded.opus.assign(plaintext.begin() + 8, plaintext.end());
+    packet = std::move(decoded);
+    return true;
+  }
+
+  bool decode_camera_fragment(std::string_view payload,
+                              crypto::cipher::gcm_t &cipher,
+                              camera_fragment_t &fragment) {
+    if (payload.size() < camera_packet_header_size + camera_fragment_header_size + 1 ||
+        payload.size() > camera_packet_header_size + camera_fragment_header_size +
+                         camera_fragment_data_size) {
+      return false;
+    }
+    auto bytes = reinterpret_cast<const std::uint8_t *>(payload.data());
+    if (read_be32(bytes) != camera_packet_magic || bytes[4] != 1 || bytes[5] != 0 ||
+        read_be16(bytes + 6) != payload.size()) {
+      return false;
+    }
+
+    camera_fragment_t decoded;
+    decoded.connect_data = read_be32(bytes + 8);
+    decoded.sequence = read_be64(bytes + 12);
+    crypto::aes_t iv(12, 0);
+    for (int i = 0; i < 8; ++i) {
+      iv[i] = bytes[12 + i];
+    }
+    iv[10] = 'C';
+    iv[11] = 'A';
+
+    std::vector<std::uint8_t> plaintext;
+    if (cipher.decrypt(payload.substr(20), plaintext, &iv) < 0 ||
+        plaintext.size() < camera_fragment_header_size + 1 ||
+        plaintext.size() > camera_fragment_header_size + camera_fragment_data_size) {
+      return false;
+    }
+
+    decoded.frame_id = read_be32(plaintext.data());
+    decoded.timestamp_ms = read_be32(plaintext.data() + 4);
+    decoded.width = read_be16(plaintext.data() + 8);
+    decoded.height = read_be16(plaintext.data() + 10);
+    decoded.format = plaintext[12];
+    decoded.fragment_index = read_be16(plaintext.data() + 14);
+    decoded.fragment_count = read_be16(plaintext.data() + 16);
+    decoded.frame_length = read_be32(plaintext.data() + 18);
+    decoded.offset = read_be32(plaintext.data() + 22);
+    decoded.data.assign(plaintext.begin() + camera_fragment_header_size, plaintext.end());
+
+    if (plaintext[13] != 0 || decoded.format != 1 || decoded.width == 0 ||
+        decoded.height == 0 || decoded.fragment_count == 0 ||
+        decoded.fragment_index >= decoded.fragment_count || decoded.frame_length == 0 ||
+        decoded.frame_length > camera_max_frame_size || decoded.offset >= decoded.frame_length ||
+        decoded.data.empty() || decoded.data.size() > camera_fragment_data_size ||
+        decoded.offset + decoded.data.size() > decoded.frame_length) {
+      return false;
+    }
+
+    const auto expected_fragment_count =
+      (decoded.frame_length + camera_fragment_data_size - 1) / camera_fragment_data_size;
+    const auto expected_offset =
+      static_cast<std::uint32_t>(decoded.fragment_index) * camera_fragment_data_size;
+    const auto expected_size = std::min<std::size_t>(
+      camera_fragment_data_size, decoded.frame_length - expected_offset);
+    if (decoded.fragment_count != expected_fragment_count || decoded.offset != expected_offset ||
+        decoded.data.size() != expected_size) return false;
+
+    fragment = std::move(decoded);
+    return true;
+  }
+
+  std::optional<camera_frame_t> camera_frame_assembler_t::accept(
+    const camera_fragment_t &fragment, std::uint64_t arrival_ms) {
+    if (fragment.fragment_count == 0 || fragment.fragment_index >= fragment.fragment_count ||
+        fragment.frame_length == 0 || fragment.frame_length > camera_max_frame_size ||
+        fragment.offset >= fragment.frame_length || fragment.data.empty() ||
+        fragment.offset + fragment.data.size() > fragment.frame_length) return std::nullopt;
+    const bool newer_frame = has_frame_ &&
+                             static_cast<std::int32_t>(fragment.frame_id - frame_id_) > 0;
+    if (has_frame_ && fragment.frame_id != frame_id_ && !newer_frame) return std::nullopt;
+
+    if (!has_frame_ || newer_frame) {
+      has_frame_ = true;
+      frame_id_ = fragment.frame_id;
+      timestamp_ms_ = fragment.timestamp_ms;
+      width_ = fragment.width;
+      height_ = fragment.height;
+      fragment_count_ = fragment.fragment_count;
+      frame_length_ = fragment.frame_length;
+      bytes_.assign(fragment.frame_length, 0);
+      received_.assign(fragment.fragment_count, false);
+      received_count_ = 0;
+      sequences_.clear();
+      deadline_ms_ = arrival_ms + 500;
+    } else if (arrival_ms > deadline_ms_ || fragment.timestamp_ms != timestamp_ms_ ||
+               fragment.width != width_ || fragment.height != height_ ||
+               fragment.fragment_count != fragment_count_ ||
+               fragment.frame_length != frame_length_) {
+      return std::nullopt;
+    }
+
+    if (!sequences_.insert(fragment.sequence).second || received_[fragment.fragment_index]) {
+      return std::nullopt;
+    }
+    std::copy(fragment.data.begin(), fragment.data.end(), bytes_.begin() + fragment.offset);
+    received_[fragment.fragment_index] = true;
+    ++received_count_;
+    if (received_count_ != received_.size()) return std::nullopt;
+
+    camera_frame_t frame;
+    frame.frame_id = frame_id_;
+    frame.timestamp_ms = timestamp_ms_;
+    frame.width = width_;
+    frame.height = height_;
+    frame.bytes = bytes_;
+    return frame;
+  }
 
   enum class socket_e : int {
     video,  ///< Video
@@ -318,9 +683,10 @@ namespace stream {
       _map_type_cb.emplace(type, std::move(cb));
     }
 
-    int send(const std::string_view &payload, net::peer_t peer) {
+    int send(const std::string_view &payload, net::peer_t peer, std::uint8_t channel = CTRL_CHANNEL_GENERIC) {
+      std::lock_guard<std::mutex> lock(_enet_mutex);
       auto packet = enet_packet_create(payload.data(), payload.size(), ENET_PACKET_FLAG_RELIABLE);
-      if (enet_peer_send(peer, 0, packet)) {
+      if (enet_peer_send(peer, channel, packet)) {
         enet_packet_destroy(packet);
 
         return -1;
@@ -330,6 +696,7 @@ namespace stream {
     }
 
     void flush() {
+      std::lock_guard<std::mutex> lock(_enet_mutex);
       enet_host_flush(_host.get());
     }
 
@@ -344,6 +711,7 @@ namespace stream {
 
     ENetAddress _addr;
     net::host_t _host;
+    std::mutex _enet_mutex;
   };
 
   struct broadcast_ctx_t {
@@ -358,9 +726,34 @@ namespace stream {
 
     udp::socket video_sock {io_context};
     udp::socket audio_sock {io_context};
+    udp::socket microphone_sock {io_context};
+    udp::socket camera_sock {io_context};
 
     control_server_t control_server;
   };
+
+  struct display_topology_state_t {
+    std::unique_ptr<platf::virtual_display_topology_t> provider;
+    std::vector<std::string> output_names;
+    std::mutex mutex;
+    std::condition_variable ready_cv;
+    bool ready = false;
+  };
+
+  static std::mutex display_topology_registry_mutex;
+  static std::map<std::string, std::weak_ptr<display_topology_state_t>> display_topology_registry;
+
+  static std::shared_ptr<display_topology_state_t> display_topology_for_device(
+    const std::string &device_uuid) {
+    std::lock_guard registry_lock {display_topology_registry_mutex};
+    auto &entry = display_topology_registry[device_uuid];
+    auto state = entry.lock();
+    if (!state) {
+      state = std::make_shared<display_topology_state_t>();
+      entry = state;
+    }
+    return state;
+  }
 
   struct session_t {
     config_t config;
@@ -394,6 +787,42 @@ namespace stream {
     // until it says so, and empty forever for a client that does not send it.
     std::string keyboard_layout;
     std::string keyboard_variant;
+
+    std::uint32_t display_topology_generation = 0;
+    std::vector<display_desc_t> displays;
+    std::shared_ptr<display_topology_state_t> display_topology;
+
+    // The complete USB set most recently offered by this session. This is
+    // declarative state: when a later generation omits a device, the USB
+    // backend must detach it. Keeping it on the session is also what gives
+    // disconnect cleanup an unambiguous owner.
+    std::uint32_t usb_offer_generation = 0;
+    std::vector<usb_device_t> usb_devices;
+    std::unique_ptr<struct usb_tunnel_server_t> usb_tunnel;
+    std::unique_ptr<usb_backend_t> usb_backend;
+
+    std::uint32_t system_disk_offer_generation = 0;
+    system_disk_offer_t system_disk_offer;
+    std::unique_ptr<struct usb_tunnel_server_t> system_disk_tunnel;
+    std::unique_ptr<system_disk_backend_t> system_disk_backend;
+
+    struct {
+      std::optional<crypto::cipher::gcm_t> cipher;
+      OpusDecoder *decoder = nullptr;
+      std::unique_ptr<platf::virtual_microphone_t> sink;
+      std::uint64_t last_sequence = 0;
+      bool has_sequence = false;
+      bool first_frame_logged = false;
+    } microphone;
+
+    struct {
+      std::optional<crypto::cipher::gcm_t> cipher;
+      std::unique_ptr<platf::virtual_camera_t> sink;
+      camera_frame_assembler_t assembler;
+      bool first_frame_logged = false;
+    } camera;
+
+    ~session_t();
 
     struct {
       std::string ping_payload;
@@ -438,6 +867,7 @@ namespace stream {
 
       net::peer_t peer;
       std::uint32_t seq;
+      std::mutex send_mutex;
 
       platf::feedback_queue_t feedback_queue;
       safe::mail_raw_t::event_t<video::hdr_info_t> hdr_queue;
@@ -446,6 +876,7 @@ namespace stream {
     std::uint32_t launch_session_id;
     std::string device_name;
     std::string device_uuid;
+    std::weak_ptr<session_t> self;
     crypto::PERM permission;
 
     std::list<crypto::command_entry_t> do_cmds;
@@ -474,6 +905,10 @@ namespace stream {
       return plaintext;
     }
 
+    // USB tunnel readers send from worker threads while clipboard/HDR/control
+    // messages can be emitted by the main stream thread. The sequence and GCM
+    // IV are a single ordered stream and must be advanced atomically.
+    std::lock_guard<std::mutex> send_lock(session->control.send_mutex);
     auto seq = session->control.seq++;
 
     auto &iv = session->control.outgoing_iv;
@@ -512,6 +947,357 @@ namespace stream {
     packet->seq = util::endian::little(seq);
 
     return std::string_view {(char *) tagged_cipher.data(), packet_length + sizeof(control_encrypted_t) - sizeof(control_encrypted_t::seq)};
+  }
+
+  constexpr std::size_t usb_tunnel_chunk_size = 16384;
+  constexpr std::size_t usb_tunnel_queue_limit = 1024 * 1024;
+  constexpr std::uint16_t usb_close_normal = 0;
+  constexpr std::uint16_t usb_close_io_error = 2;
+  constexpr std::uint16_t usb_close_protocol_error = 3;
+
+  static bool send_usb_tunnel_packet(control_server_t *server, session_t *session,
+                                     std::uint16_t type, const void *body, std::size_t body_size) {
+    constexpr std::size_t plaintext_capacity = sizeof(control_header_v2) + 8 + usb_tunnel_chunk_size;
+    if (!session->control.peer || body_size > plaintext_capacity - sizeof(control_header_v2)) {
+      return false;
+    }
+
+    std::array<std::uint8_t, plaintext_capacity> plaintext {};
+    auto header = reinterpret_cast<control_header_v2 *>(plaintext.data());
+    header->type = type;
+    header->payloadLength = (std::uint16_t) body_size;
+    std::memcpy(plaintext.data() + sizeof(control_header_v2), body, body_size);
+
+    std::array<std::uint8_t,
+      sizeof(control_encrypted_t) + crypto::cipher::round_to_pkcs7_padded(plaintext_capacity) + crypto::cipher::tag_size>
+      encrypted_payload;
+    auto encoded = encode_control(session,
+      std::string_view {(const char *) plaintext.data(), sizeof(control_header_v2) + body_size},
+      encrypted_payload);
+    return !encoded.empty() && server->send(encoded, session->control.peer, CTRL_CHANNEL_USB) == 0;
+  }
+
+  static bool send_tunnel_open(control_server_t *server, session_t *session,
+                               std::uint16_t type, std::uint32_t id) {
+    std::array<std::uint8_t, 8> body {};
+    body[0] = (std::uint8_t) id;
+    body[1] = (std::uint8_t) (id >> 8);
+    body[2] = (std::uint8_t) (id >> 16);
+    body[3] = (std::uint8_t) (id >> 24);
+    return send_usb_tunnel_packet(server, session, type, body.data(), body.size());
+  }
+
+  static bool send_tunnel_data(control_server_t *server, session_t *session,
+                               std::uint16_t type, std::uint32_t id,
+                               const void *data, std::uint16_t length) {
+    if (data == nullptr || length == 0 || length > usb_tunnel_chunk_size) {
+      return false;
+    }
+    std::array<std::uint8_t, 8 + usb_tunnel_chunk_size> body {};
+    body[0] = (std::uint8_t) id;
+    body[1] = (std::uint8_t) (id >> 8);
+    body[2] = (std::uint8_t) (id >> 16);
+    body[3] = (std::uint8_t) (id >> 24);
+    body[4] = (std::uint8_t) length;
+    body[5] = (std::uint8_t) (length >> 8);
+    std::memcpy(body.data() + 8, data, length);
+    return send_usb_tunnel_packet(server, session, type, body.data(), 8 + length);
+  }
+
+  static bool send_tunnel_close(control_server_t *server, session_t *session,
+                                std::uint16_t type, std::uint32_t id,
+                                std::uint16_t reason) {
+    std::array<std::uint8_t, 8> body {};
+    body[0] = (std::uint8_t) id;
+    body[1] = (std::uint8_t) (id >> 8);
+    body[2] = (std::uint8_t) (id >> 16);
+    body[3] = (std::uint8_t) (id >> 24);
+    body[4] = (std::uint8_t) reason;
+    body[5] = (std::uint8_t) (reason >> 8);
+    return send_usb_tunnel_packet(server, session, type, body.data(), body.size());
+  }
+
+  struct usb_tunnel_server_t {
+    struct tunnel_t {
+      std::uint32_t id;
+      std::shared_ptr<tcp::socket> socket;
+      std::mutex mutex;
+      std::condition_variable wake;
+      std::deque<std::string> pending;
+      std::size_t queued_bytes = 0;
+      std::atomic<bool> closed {false};
+      std::thread reader;
+      std::thread writer;
+    };
+
+    control_server_t *server;
+    session_t *session;
+    asio::io_context io;
+    tcp::acceptor acceptor;
+    std::atomic<bool> stopping {false};
+    std::atomic<std::uint32_t> next_id {1};
+    std::mutex mutex;
+    std::map<std::uint32_t, std::shared_ptr<tunnel_t>> tunnels;
+    std::thread accept_thread;
+    std::uint16_t open_type;
+    std::uint16_t data_type;
+    std::uint16_t close_type;
+    std::string label;
+
+    usb_tunnel_server_t(control_server_t *server_, session_t *session_,
+                        std::uint16_t open_type_ = packetTypes[IDX_USB_TUNNEL_OPEN],
+                        std::uint16_t data_type_ = packetTypes[IDX_USB_TUNNEL_DATA],
+                        std::uint16_t close_type_ = packetTypes[IDX_USB_TUNNEL_CLOSE],
+                        std::string label_ = "USB")
+      : server(server_), session(session_), acceptor(io, tcp::endpoint(asio::ip::address_v4::loopback(), 0)),
+        open_type(open_type_), data_type(data_type_), close_type(close_type_), label(std::move(label_)) {
+      sys::error_code ec;
+      acceptor.non_blocking(true, ec);
+      if (ec) {
+        throw sys::system_error(ec);
+      }
+      accept_thread = std::thread([this] { accept_loop(); });
+    }
+
+    ~usb_tunnel_server_t() {
+      stop();
+    }
+
+    std::uint16_t port() const {
+      sys::error_code ec;
+      auto endpoint = acceptor.local_endpoint(ec);
+      return ec ? 0 : endpoint.port();
+    }
+
+    void finish(const std::shared_ptr<tunnel_t> &tunnel, std::uint16_t reason, bool notify) {
+      if (tunnel->closed.exchange(true)) {
+        return;
+      }
+      sys::error_code ec;
+      tunnel->socket->shutdown(tcp::socket::shutdown_both, ec);
+      tunnel->socket->close(ec);
+      tunnel->wake.notify_all();
+      if (notify && !stopping) {
+        send_tunnel_close(server, session, close_type, tunnel->id, reason);
+      }
+    }
+
+    void accept_loop() {
+      while (!stopping) {
+        auto socket = std::make_shared<tcp::socket>(io);
+        sys::error_code ec;
+        acceptor.accept(*socket, ec);
+        if (ec) {
+          if (ec == asio::error::would_block || ec == asio::error::try_again) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            continue;
+          }
+          if (!stopping) {
+            BOOST_LOG(warning) << label << " tunnel accept failed: "sv << ec.message();
+          }
+          continue;
+        }
+        if (stopping) {
+          socket->close(ec);
+          break;
+        }
+
+        auto tunnel = std::make_shared<tunnel_t>();
+        tunnel->id = next_id.fetch_add(1);
+        tunnel->socket = std::move(socket);
+        std::vector<std::shared_ptr<tunnel_t>> finished;
+        bool rejected = false;
+        {
+          std::lock_guard<std::mutex> lock(mutex);
+          for (auto it = tunnels.begin(); it != tunnels.end();) {
+            if (it->second->closed) {
+              finished.push_back(it->second);
+              it = tunnels.erase(it);
+            } else {
+              ++it;
+            }
+          }
+          if (tunnels.size() >= 16 || tunnel->id == 0) {
+            rejected = true;
+          } else {
+            tunnels.emplace(tunnel->id, tunnel);
+          }
+        }
+        for (const auto &old : finished) {
+          if (old->reader.joinable()) old->reader.join();
+          if (old->writer.joinable()) old->writer.join();
+        }
+        if (rejected) {
+          finish(tunnel, usb_close_protocol_error, false);
+          continue;
+        }
+
+        if (!send_tunnel_open(server, session, open_type, tunnel->id)) {
+          finish(tunnel, usb_close_io_error, false);
+          continue;
+        }
+
+        tunnel->reader = std::thread([this, tunnel] {
+          std::array<char, usb_tunnel_chunk_size> buffer;
+          while (!tunnel->closed) {
+            sys::error_code ec;
+            auto count = tunnel->socket->read_some(asio::buffer(buffer), ec);
+            if (ec || count == 0 || !send_tunnel_data(server, session, data_type, tunnel->id,
+                                                       buffer.data(), (std::uint16_t) count)) {
+              finish(tunnel, ec == asio::error::eof ? usb_close_normal : usb_close_io_error, true);
+              break;
+            }
+          }
+        });
+
+        tunnel->writer = std::thread([this, tunnel] {
+          for (;;) {
+            std::string chunk;
+            {
+              std::unique_lock<std::mutex> lock(tunnel->mutex);
+              tunnel->wake.wait(lock, [&] { return tunnel->closed || !tunnel->pending.empty(); });
+              if (tunnel->closed && tunnel->pending.empty()) {
+                break;
+              }
+              chunk = std::move(tunnel->pending.front());
+              tunnel->queued_bytes -= chunk.size();
+              tunnel->pending.pop_front();
+            }
+            sys::error_code ec;
+            asio::write(*tunnel->socket, asio::buffer(chunk), ec);
+            if (ec) {
+              finish(tunnel, usb_close_io_error, true);
+              break;
+            }
+          }
+        });
+      }
+    }
+
+    void write(std::uint32_t id, std::string_view data) {
+      std::shared_ptr<tunnel_t> tunnel;
+      {
+        std::lock_guard<std::mutex> lock(mutex);
+        auto it = tunnels.find(id);
+        if (it == tunnels.end()) {
+          send_tunnel_close(server, session, close_type, id, usb_close_protocol_error);
+          return;
+        }
+        tunnel = it->second;
+      }
+      std::lock_guard<std::mutex> lock(tunnel->mutex);
+      if (tunnel->closed) {
+        return;
+      }
+      if (data.empty() || data.size() > usb_tunnel_chunk_size ||
+          tunnel->queued_bytes + data.size() > usb_tunnel_queue_limit) {
+        finish(tunnel, usb_close_protocol_error, true);
+        return;
+      }
+      tunnel->pending.emplace_back(data);
+      tunnel->queued_bytes += data.size();
+      tunnel->wake.notify_one();
+    }
+
+    void close(std::uint32_t id) {
+      std::shared_ptr<tunnel_t> tunnel;
+      {
+        std::lock_guard<std::mutex> lock(mutex);
+        auto it = tunnels.find(id);
+        if (it == tunnels.end()) {
+          return;
+        }
+        tunnel = it->second;
+      }
+      finish(tunnel, usb_close_normal, false);
+    }
+
+    void stop() {
+      auto wake_port = port();
+      if (stopping.exchange(true)) {
+        return;
+      }
+      sys::error_code ec;
+      if (wake_port != 0 && acceptor.is_open()) {
+        asio::io_context wake_io;
+        tcp::socket wake_socket(wake_io);
+        wake_socket.connect(tcp::endpoint(asio::ip::address_v4::loopback(), wake_port), ec);
+      }
+      if (accept_thread.joinable()) {
+        accept_thread.join();
+      }
+      acceptor.close(ec);
+      std::vector<std::shared_ptr<tunnel_t>> all;
+      {
+        std::lock_guard<std::mutex> lock(mutex);
+        for (const auto &item : tunnels) {
+          all.push_back(item.second);
+        }
+      }
+      for (const auto &tunnel : all) {
+        finish(tunnel, usb_close_normal, false);
+      }
+      for (const auto &tunnel : all) {
+        if (tunnel->reader.joinable()) tunnel->reader.join();
+        if (tunnel->writer.joinable()) tunnel->writer.join();
+      }
+    }
+  };
+
+  session_t::~session_t() {
+    // Stop workers while the control cipher, peer, and server session are
+    // still alive; member destruction order alone would tear those down first.
+    // Reconciliation receives an empty final set and finishes its detach pass
+    // before the loopback tunnel is taken away.
+    system_disk_backend.reset();
+    system_disk_tunnel.reset();
+    usb_backend.reset();
+    usb_tunnel.reset();
+    microphone.sink.reset();
+    display_topology.reset();
+    if (microphone.decoder) {
+      opus_decoder_destroy(microphone.decoder);
+      microphone.decoder = nullptr;
+    }
+  }
+
+  bool parse_usb_tunnel_data(const std::string_view &payload,
+                             std::uint32_t &id,
+                             std::string_view &data) {
+    if (payload.size() < 8) {
+      return false;
+    }
+    auto bytes = reinterpret_cast<const std::uint8_t *>(payload.data());
+    auto length = (std::uint16_t) (bytes[4] | ((std::uint16_t) bytes[5] << 8));
+    auto reserved = (std::uint16_t) (bytes[6] | ((std::uint16_t) bytes[7] << 8));
+    if (length == 0 || length > usb_tunnel_chunk_size || reserved != 0 || payload.size() != 8 + length) {
+      return false;
+    }
+    id = bytes[0] | ((std::uint32_t) bytes[1] << 8) |
+         ((std::uint32_t) bytes[2] << 16) | ((std::uint32_t) bytes[3] << 24);
+    if (id == 0) {
+      return false;
+    }
+    data = payload.substr(8, length);
+    return true;
+  }
+
+  bool parse_usb_tunnel_close(const std::string_view &payload,
+                              std::uint32_t &id,
+                              std::uint16_t &reason) {
+    if (payload.size() != 8) {
+      return false;
+    }
+    auto bytes = reinterpret_cast<const std::uint8_t *>(payload.data());
+    auto reserved = (std::uint16_t) (bytes[6] | ((std::uint16_t) bytes[7] << 8));
+    auto parsed_id = bytes[0] | ((std::uint32_t) bytes[1] << 8) |
+                     ((std::uint32_t) bytes[2] << 16) | ((std::uint32_t) bytes[3] << 24);
+    if (parsed_id == 0 || reserved != 0) {
+      return false;
+    }
+    id = parsed_id;
+    reason = bytes[4] | ((std::uint16_t) bytes[5] << 8);
+    return true;
   }
 
   int start_broadcast(broadcast_ctx_t &ctx);
@@ -607,7 +1393,11 @@ namespace stream {
 
   void control_server_t::iterate(std::chrono::milliseconds timeout) {
     ENetEvent event;
-    auto res = enet_host_service(_host.get(), &event, timeout.count());
+    int res;
+    {
+      std::lock_guard<std::mutex> lock(_enet_mutex);
+      res = enet_host_service(_host.get(), &event, timeout.count());
+    }
 
     if (res > 0) {
       auto session = get_session(event.peer, event.data);
@@ -756,6 +1546,128 @@ namespace stream {
       };
     }
   }  // namespace fec
+
+  bool parse_usb_device_offer(const std::string_view &payload,
+                              std::uint32_t &generation,
+                              std::vector<usb_device_t> &devices) {
+    constexpr std::size_t header_size = 8;
+    constexpr std::size_t entry_header_size = 8;
+    constexpr std::uint16_t max_devices = 64;
+    constexpr std::uint16_t max_busid = 32;
+    constexpr std::uint16_t max_hwid = 16;
+    constexpr std::uint16_t max_label = 128;
+
+    if (payload.size() < header_size) {
+      return false;
+    }
+
+    auto bytes = reinterpret_cast<const std::uint8_t *>(payload.data());
+    if (bytes[0] != 1 || bytes[1] != 0) {
+      return false;
+    }
+
+    auto read16 = [bytes](std::size_t at) -> std::uint16_t {
+      return bytes[at] | ((std::uint16_t) bytes[at + 1] << 8);
+    };
+    auto read32 = [bytes](std::size_t at) -> std::uint32_t {
+      return bytes[at] | ((std::uint32_t) bytes[at + 1] << 8) |
+             ((std::uint32_t) bytes[at + 2] << 16) | ((std::uint32_t) bytes[at + 3] << 24);
+    };
+
+    std::uint16_t count = read16(2);
+    if (count > max_devices) {
+      return false;
+    }
+
+    std::vector<usb_device_t> parsed;
+    parsed.reserve(count);
+    std::size_t at = header_size;
+    for (std::uint16_t i = 0; i < count; ++i) {
+      if (at > payload.size() || payload.size() - at < entry_header_size) {
+        return false;
+      }
+
+      std::uint16_t busid_len = read16(at);
+      std::uint16_t hwid_len = read16(at + 2);
+      std::uint16_t label_len = read16(at + 4);
+      // The final uint16 is reserved and must remain zero until a newer
+      // message version assigns it semantics.
+      if (read16(at + 6) != 0) {
+        return false;
+      }
+      at += entry_header_size;
+
+      std::size_t strings_len = (std::size_t) busid_len + hwid_len + label_len;
+      if (busid_len == 0 || busid_len > max_busid || hwid_len > max_hwid ||
+          label_len > max_label || strings_len > payload.size() - at) {
+        return false;
+      }
+
+      usb_device_t device;
+      device.busid.assign(payload.data() + at, busid_len);
+      at += busid_len;
+      device.hwid.assign(payload.data() + at, hwid_len);
+      at += hwid_len;
+      device.label.assign(payload.data() + at, label_len);
+      at += label_len;
+
+      bool valid_busid = device.busid.find_first_not_of("0123456789-.") == std::string::npos &&
+                         device.busid.front() != '.' && device.busid.back() != '.';
+      bool duplicate = std::any_of(parsed.begin(), parsed.end(), [&device](const auto &other) {
+        return other.busid == device.busid;
+      });
+      if (!valid_busid || duplicate) {
+        return false;
+      }
+      parsed.emplace_back(std::move(device));
+    }
+
+    // Version 1 has no trailer. Rejecting one catches corrupted lengths and
+    // keeps future additions behind a version bump rather than accidental
+    // interpretation by an old host.
+    if (at != payload.size()) {
+      return false;
+    }
+
+    generation = read32(4);
+    devices = std::move(parsed);
+    return true;
+  }
+
+  std::vector<usb_sync_action_t> plan_usb_device_sync(
+    const std::vector<usb_attachment_t> &current,
+    const std::vector<usb_device_t> &offered) {
+    std::vector<usb_sync_action_t> actions;
+    actions.reserve(current.size() + offered.size());
+
+    // Attach the missing desired set first. Both inputs are bounded by the
+    // USB/IP table/protocol, so straightforward scans keep ordering explicit
+    // and avoid letting a map silently discard a malformed duplicate.
+    for (const auto &device : offered) {
+      auto present = std::any_of(current.begin(), current.end(), [&](const auto &attachment) {
+        return attachment.busid == device.busid;
+      });
+      if (!present) {
+        actions.push_back({usb_sync_action_e::attach, device, -1});
+      }
+    }
+
+    // Then remove every stale imported port. Detach is port-based because the
+    // USB/IP client assigns a local vhci port that is distinct from the remote
+    // bus id, and re-reading that table before execution remains mandatory.
+    for (const auto &attachment : current) {
+      auto wanted = std::any_of(offered.begin(), offered.end(), [&](const auto &device) {
+        return device.busid == attachment.busid;
+      });
+      if (!wanted) {
+        actions.push_back({usb_sync_action_e::detach,
+                           {attachment.busid, {}, {}},
+                           attachment.port});
+      }
+    }
+
+    return actions;
+  }
 
   /**
    * @brief Combines two buffers and inserts new buffers at each slice boundary of the result.
@@ -1270,56 +2182,24 @@ namespace stream {
     //   uint8 format version (1) | uint8 reserved | uint16 count
     //   count x { uint16 featureId; uint16 featureVersion }
     server->map(packetTypes[IDX_FEATURE_ADVERTISE], [server](session_t *session, const std::string_view &payload) {
+      auto local_features = host_supported_features(
+        platf::virtual_camera_available(),
+        platf::virtual_display_topology_available());
       constexpr std::uint8_t format_version = 1;
       constexpr std::size_t header_size = 4;
       constexpr std::size_t entry_size = 4;
-      // Bounded so a hostile count cannot make us allocate: the map is filled
-      // from what actually arrived, never from what the header claims.
-      constexpr std::size_t max_entries = 64;
-
-      if (payload.size() < header_size) {
-        BOOST_LOG(warning) << "Feature advertisement from ["sv << session->device_name << "] is too short"sv;
+      std::map<std::uint16_t, std::uint16_t> features;
+      if (!parse_feature_advertisement(payload, features)) {
+        BOOST_LOG(warning) << "Ignoring malformed feature advertisement from ["sv
+                           << session->device_name << ']';
         return;
       }
-
-      auto bytes = reinterpret_cast<const std::uint8_t *>(payload.data());
-
-      if (bytes[0] != format_version) {
-        // Refusing to guess: a format we do not know leaves every feature
-        // reading as unsupported, which loses a feature rather than
-        // misinterpreting one.
-        BOOST_LOG(info) << "Ignoring feature advertisement in unknown format "sv << (int) bytes[0];
-        return;
-      }
-
-      std::uint16_t count = bytes[2] | (bytes[3] << 8);
-      std::size_t available = (payload.size() - header_size) / entry_size;
-
-      if (count > available) {
-        BOOST_LOG(warning) << "Feature advertisement claimed "sv << count
-                           << " entries but carried "sv << available;
-        count = (std::uint16_t) available;
-      }
-
-      session->peer_features.clear();
-      for (std::size_t i = 0; i < count && i < max_entries; ++i) {
-        auto off = header_size + i * entry_size;
-        std::uint16_t id = bytes[off] | (bytes[off + 1] << 8);
-        std::uint16_t version = bytes[off + 2] | (bytes[off + 3] << 8);
-        session->peer_features[id] = version;
-      }
+      session->peer_features = negotiate_features(features, local_features);
 
       BOOST_LOG(info) << "Client ["sv << session->device_name << "] advertised "sv
                       << session->peer_features.size() << " feature(s)"sv;
 
-      // Answer with ours. Helios advertises nothing yet: the channel is in
-      // place and the passengers land on top of it, so an empty list here is
-      // the honest report rather than a placeholder.
-      static const std::vector<std::pair<std::uint16_t, std::uint16_t>> local_features = {
-        {ML_FEATURE_CLIPBOARD, 1},
-        {ML_FEATURE_KEYBOARD_LAYOUT, 1},
-      };
-
+      // Answer with the exact feature versions this build implements.
       // Fixed capacity rather than a vector: encode_control is a template over
       // std::array, so the buffer size has to be a constant. Sized for the
       // most features Helios could advertise, and only the used prefix is sent.
@@ -1347,10 +2227,11 @@ namespace stream {
 
       for (std::size_t i = 0; i < local_features.size(); ++i) {
         auto off = header_size + i * entry_size;
-        body[off] = (std::uint8_t) (local_features[i].first & 0xFF);
-        body[off + 1] = (std::uint8_t) (local_features[i].first >> 8);
-        body[off + 2] = (std::uint8_t) (local_features[i].second & 0xFF);
-        body[off + 3] = (std::uint8_t) (local_features[i].second >> 8);
+        auto feature = std::next(local_features.begin(), i);
+        body[off] = (std::uint8_t) (feature->first & 0xFF);
+        body[off + 1] = (std::uint8_t) (feature->first >> 8);
+        body[off + 2] = (std::uint8_t) (feature->second & 0xFF);
+        body[off + 3] = (std::uint8_t) (feature->second >> 8);
       }
 
       if (!session->control.peer) {
@@ -1372,6 +2253,12 @@ namespace stream {
     // Clipboard, advertise-then-fetch. The client says what it has; nothing
     // crosses until something here actually pastes.
     server->map(packetTypes[IDX_CLIPBOARD_OFFER], [server](session_t *session, const std::string_view &payload) {
+      if (!session->peer_features.count(ML_FEATURE_CLIPBOARD)) {
+        BOOST_LOG(debug) << "Ignoring an unnegotiated clipboard offer from ["sv
+                         << session->device_name << ']';
+        return;
+      }
+
       if (!(session->permission & crypto::PERM::clipboard_set)) {
         BOOST_LOG(debug) << "Permission Clipboard Set denied for ["sv << session->device_name << ']';
         return;
@@ -1414,6 +2301,12 @@ namespace stream {
     });
 
     server->map(packetTypes[IDX_CLIPBOARD_DATA], [server](session_t *session, const std::string_view &payload) {
+      if (!session->peer_features.count(ML_FEATURE_CLIPBOARD)) {
+        BOOST_LOG(debug) << "Ignoring unnegotiated clipboard data from ["sv
+                         << session->device_name << ']';
+        return;
+      }
+
       if (!(session->permission & crypto::PERM::clipboard_set)) {
         BOOST_LOG(debug) << "Permission Clipboard Set denied for ["sv << session->device_name << ']';
         return;
@@ -1455,6 +2348,12 @@ namespace stream {
     });
 
     server->map(packetTypes[IDX_CLIPBOARD_REQUEST], [server](session_t *session, const std::string_view &payload) {
+      if (!session->peer_features.count(ML_FEATURE_CLIPBOARD)) {
+        BOOST_LOG(debug) << "Ignoring an unnegotiated clipboard request from ["sv
+                         << session->device_name << ']';
+        return;
+      }
+
       if (!(session->permission & crypto::PERM::clipboard_read)) {
         BOOST_LOG(debug) << "Permission Clipboard Read denied for ["sv << session->device_name << ']';
         return;
@@ -1481,6 +2380,12 @@ namespace stream {
     });
 
     server->map(packetTypes[IDX_KEYBOARD_LAYOUT], [server](session_t *session, const std::string_view &payload) {
+      if (!session->peer_features.count(ML_FEATURE_KEYBOARD_LAYOUT)) {
+        BOOST_LOG(debug) << "Ignoring an unnegotiated keyboard layout from ["sv
+                         << session->device_name << ']';
+        return;
+      }
+
       if (payload.size() < 6) {
         return;
       }
@@ -1512,6 +2417,226 @@ namespace stream {
       // for whoever is sitting at that machine too, and there is no portable
       // way to do it per-device across compositors -- so what to do with this
       // is a policy decision rather than something to assume.
+    });
+
+    // Declarative USB device set. The actual USB/IP attachment backend is
+    // deliberately downstream of this parser: the wire never contains a
+    // command line or a host path, only the complete set this authenticated
+    // streaming session offers.
+    server->map(packetTypes[IDX_USB_DEVICE_SYNC], [server](session_t *session, const std::string_view &payload) {
+      if (!session->peer_features.count(ML_FEATURE_USB_PASSTHROUGH)) {
+        BOOST_LOG(debug) << "Ignoring an unnegotiated USB device offer from ["sv
+                         << session->device_name << ']';
+        return;
+      }
+
+      std::uint32_t generation;
+      std::vector<usb_device_t> offered;
+      if (!parse_usb_device_offer(payload, generation, offered)) {
+        BOOST_LOG(warning) << "Ignoring a malformed USB device offer from ["sv
+                           << session->device_name << ']';
+        return;
+      }
+
+      if (session->usb_offer_generation != 0 &&
+          static_cast<std::int32_t>(generation - session->usb_offer_generation) <= 0) {
+        BOOST_LOG(debug) << "Ignoring stale USB device generation "sv << generation;
+        return;
+      }
+
+      session->usb_offer_generation = generation;
+      session->usb_devices = std::move(offered);
+      BOOST_LOG(info) << "Client ["sv << session->device_name << "] offered "sv
+                      << session->usb_devices.size() << " USB device(s), generation "sv << generation;
+
+      if (!session->usb_devices.empty() && !session->usb_tunnel) {
+        try {
+          session->usb_tunnel = std::make_unique<usb_tunnel_server_t>(server, session);
+          BOOST_LOG(info) << "USB tunnel proxy for ["sv << session->device_name
+                          << "] is listening on loopback port "sv << session->usb_tunnel->port();
+        } catch (const std::exception &e) {
+          BOOST_LOG(error) << "Unable to start the USB tunnel proxy for ["sv
+                           << session->device_name << "]: "sv << e.what();
+          session->usb_tunnel.reset();
+        }
+      }
+      if (session->usb_tunnel && !session->usb_backend) {
+        session->usb_backend = std::make_unique<usb_backend_t>(session->usb_tunnel->port());
+      }
+      if (session->usb_backend) {
+        session->usb_backend->sync(generation, session->usb_devices);
+      }
+    });
+
+    server->map(packetTypes[IDX_DISPLAY_TOPOLOGY], [](session_t *session, const std::string_view &payload) {
+      if (!session->peer_features.count(ML_FEATURE_DISPLAY_TOPOLOGY)) {
+        BOOST_LOG(debug) << "Ignoring unnegotiated display topology from ["sv
+                         << session->device_name << ']';
+        return;
+      }
+      std::uint32_t generation = 0;
+      std::vector<display_desc_t> displays;
+      if (!parse_display_topology(payload, generation, displays)) {
+        BOOST_LOG(warning) << "Ignoring malformed display topology from ["sv
+                           << session->device_name << ']';
+        return;
+      }
+      if (session->display_topology_generation != 0 &&
+          (std::int32_t) (generation - session->display_topology_generation) <= 0) {
+        BOOST_LOG(debug) << "Ignoring stale display topology generation "sv << generation;
+        return;
+      }
+      session->display_topology_generation = generation;
+      session->displays = std::move(displays);
+      BOOST_LOG(info) << "Client ["sv << session->device_name << "] has "sv
+                      << session->displays.size() << " display(s), topology generation "sv
+                      << generation;
+      if (!session->display_topology) {
+        session->display_topology = display_topology_for_device(session->device_uuid);
+      }
+      auto topology = session->display_topology;
+      std::lock_guard topology_lock {topology->mutex};
+      if (!topology->provider) {
+        topology->provider = platf::virtual_display_topology();
+      }
+      if (topology->provider) {
+        std::vector<platf::client_display_t> platform_displays;
+        platform_displays.reserve(session->displays.size());
+        for (const auto &display : session->displays) {
+          platform_displays.push_back({
+            display.x, display.y, display.width, display.height,
+            display.refresh_millihz, display.scale_milli,
+            (display.flags & 0x0001) != 0, (display.flags & 0x0002) != 0,
+          });
+        }
+        if (!topology->provider->apply(platform_displays)) {
+          BOOST_LOG(warning) << "Could not materialise client display topology on this host"sv;
+        } else {
+          topology->output_names = topology->provider->display_names();
+          topology->ready = true;
+          topology->ready_cv.notify_all();
+        }
+      } else {
+        BOOST_LOG(info) << "No virtual display topology provider is available on this host"sv;
+        topology->ready = true;
+        topology->ready_cv.notify_all();
+      }
+    });
+
+    server->map(packetTypes[IDX_SYSTEM_DISK_OFFER], [server](session_t *session,
+                                                             const std::string_view &payload) {
+      if (!session->peer_features.count(ML_FEATURE_SYSTEM_DISK)) {
+        BOOST_LOG(debug) << "Ignoring an unnegotiated system disk offer from ["sv
+                         << session->device_name << ']';
+        return;
+      }
+
+      system_disk_offer_t offer;
+      if (!parse_system_disk_offer(payload, offer)) {
+        BOOST_LOG(warning) << "Ignoring a malformed system disk offer from ["sv
+                           << session->device_name << ']';
+        return;
+      }
+      if (session->system_disk_offer_generation != 0 &&
+          (std::int32_t) (offer.generation - session->system_disk_offer_generation) <= 0) {
+        BOOST_LOG(debug) << "Ignoring stale system disk generation "sv << offer.generation;
+        return;
+      }
+
+      const auto previous_offer = session->system_disk_offer;
+      session->system_disk_offer_generation = offer.generation;
+      if (!offer.present()) {
+        session->system_disk_offer = offer;
+        session::detach_slow_cleanup(session->self.lock());
+        BOOST_LOG(info) << "Client ["sv << session->device_name << "] withdrew its system disk"sv;
+        return;
+      }
+
+
+      if (session->system_disk_backend) {
+        if (previous_offer.target_iqn == offer.target_iqn) {
+          session->system_disk_offer = offer;
+          BOOST_LOG(debug) << "Keeping the existing system disk attachment for generation "sv
+                           << offer.generation;
+        } else {
+          BOOST_LOG(warning) << "Ignoring an in-place system disk target change; withdraw the old "sv
+                                "target before offering a new one"sv;
+        }
+        return;
+      }
+      session->system_disk_offer = offer;
+
+      if (!session->system_disk_tunnel) {
+        try {
+          session->system_disk_tunnel = std::make_unique<usb_tunnel_server_t>(
+            server, session,
+            packetTypes[IDX_DISK_TUNNEL_OPEN], packetTypes[IDX_DISK_TUNNEL_DATA],
+            packetTypes[IDX_DISK_TUNNEL_CLOSE], "system disk");
+        } catch (const std::exception &e) {
+          BOOST_LOG(error) << "Unable to start the system disk tunnel for ["sv
+                           << session->device_name << "]: "sv << e.what();
+          session->system_disk_tunnel.reset();
+          return;
+        }
+      }
+      session->system_disk_backend = std::make_unique<system_disk_backend_t>(
+        session->system_disk_tunnel->port(), offer.target_iqn);
+      BOOST_LOG(info) << "Client ["sv << session->device_name << "] offered read-only disk ["sv
+                      << offer.target_iqn << "], "sv << offer.size << " bytes; loopback proxy port "sv
+                      << session->system_disk_tunnel->port();
+    });
+
+    // The client is the only side allowed to initiate a tunnel. Helios accepts
+    // a loopback USB/IP connection and emits OPEN; receiving OPEN here would
+    // invert that trust boundary, so there is intentionally no OPEN handler.
+    server->map(packetTypes[IDX_USB_TUNNEL_DATA], [](session_t *session, const std::string_view &payload) {
+      std::uint32_t id = 0;
+      std::string_view data;
+      if (!session->peer_features.count(ML_FEATURE_USB_PASSTHROUGH) ||
+          !session->usb_tunnel || !parse_usb_tunnel_data(payload, id, data)) {
+        BOOST_LOG(warning) << "Ignoring malformed or unnegotiated USB tunnel data from ["sv
+                           << session->device_name << ']';
+        return;
+      }
+      session->usb_tunnel->write(id, data);
+    });
+
+    server->map(packetTypes[IDX_USB_TUNNEL_CLOSE], [](session_t *session, const std::string_view &payload) {
+      std::uint32_t id = 0;
+      std::uint16_t reason = 0;
+      if (!session->peer_features.count(ML_FEATURE_USB_PASSTHROUGH) ||
+          !session->usb_tunnel || !parse_usb_tunnel_close(payload, id, reason)) {
+        BOOST_LOG(warning) << "Ignoring malformed or unnegotiated USB tunnel close from ["sv
+                           << session->device_name << ']';
+        return;
+      }
+      BOOST_LOG(debug) << "Client closed USB tunnel "sv << id << " with reason "sv << reason;
+      session->usb_tunnel->close(id);
+    });
+
+    server->map(packetTypes[IDX_DISK_TUNNEL_DATA], [](session_t *session, const std::string_view &payload) {
+      std::uint32_t id = 0;
+      std::string_view data;
+      if (!session->peer_features.count(ML_FEATURE_SYSTEM_DISK) ||
+          !session->system_disk_tunnel || !parse_usb_tunnel_data(payload, id, data)) {
+        BOOST_LOG(warning) << "Ignoring malformed or unnegotiated system disk tunnel data from ["sv
+                           << session->device_name << ']';
+        return;
+      }
+      session->system_disk_tunnel->write(id, data);
+    });
+
+    server->map(packetTypes[IDX_DISK_TUNNEL_CLOSE], [](session_t *session, const std::string_view &payload) {
+      std::uint32_t id = 0;
+      std::uint16_t reason = 0;
+      if (!session->peer_features.count(ML_FEATURE_SYSTEM_DISK) ||
+          !session->system_disk_tunnel || !parse_usb_tunnel_close(payload, id, reason)) {
+        BOOST_LOG(warning) << "Ignoring malformed or unnegotiated system disk tunnel close from ["sv
+                           << session->device_name << ']';
+        return;
+      }
+      BOOST_LOG(debug) << "Client closed system disk tunnel "sv << id << " with reason "sv << reason;
+      session->system_disk_tunnel->close(id);
     });
 
     server->map(packetTypes[IDX_SET_CLIPBOARD], [server](session_t *session, const std::string_view &payload) {
@@ -1633,17 +2758,21 @@ namespace stream {
           }
 
           if (session->state.load(std::memory_order_acquire) == session::state_e::STOPPING) {
+            BOOST_LOG(info) << "Removing stopped session from control server"sv;
             pos = server->_sessions->erase(pos);
 
             if (session->control.peer) {
+              BOOST_LOG(info) << "Removing stopped session control peer mapping"sv;
               {
                 auto ptslg = server->_peer_to_session.lock();
                 server->_peer_to_session->erase(session->control.peer);
               }
 
+              BOOST_LOG(info) << "Disconnecting stopped session ENet peer"sv;
               enet_peer_disconnect_now(session->control.peer, 0);
             }
 
+            BOOST_LOG(info) << "Signalling stopped session control completion"sv;
             session->controlEnd.raise(true);
             continue;
           }
@@ -1721,6 +2850,8 @@ namespace stream {
 
     auto &video_sock = ctx.video_sock;
     auto &audio_sock = ctx.audio_sock;
+    auto &microphone_sock = ctx.microphone_sock;
+    auto &camera_sock = ctx.camera_sock;
 
     auto &message_queue_queue = ctx.message_queue_queue;
     auto broadcast_shutdown_event = mail::man->event<bool>(mail::broadcast_shutdown);
@@ -1731,6 +2862,14 @@ namespace stream {
 
     std::array<char, 2048> buf[2];
     std::function<void(const boost::system::error_code, size_t)> recv_func[2];
+
+    udp::endpoint microphone_peer;
+    std::array<char, microphone_packet_header_size + 8 + microphone_max_opus_size> microphone_buf;
+    std::function<void(const boost::system::error_code, size_t)> microphone_recv_func;
+
+    udp::endpoint camera_peer;
+    std::array<char, camera_packet_header_size + camera_fragment_header_size + camera_fragment_data_size> camera_buf;
+    std::function<void(const boost::system::error_code, size_t)> camera_recv_func;
 
     auto populate_peer_to_session = [&]() {
       while (message_queue_queue->peek()) {
@@ -1800,8 +2939,167 @@ namespace stream {
     recv_func_init(video_sock, 0, peer_to_video_session);
     recv_func_init(audio_sock, 1, peer_to_audio_session);
 
+    microphone_recv_func = [&](const boost::system::error_code &ec, size_t bytes) {
+      auto fg = util::fail_guard([&]() {
+        microphone_sock.async_receive_from(asio::buffer(microphone_buf), microphone_peer, 0, microphone_recv_func);
+      });
+
+      if (ec == boost::system::errc::connection_refused || ec == boost::system::errc::connection_reset) {
+        return;
+      }
+      if (ec || !bytes) {
+        BOOST_LOG(error) << "Couldn't receive data from microphone UDP socket: "sv << ec.message();
+        return;
+      }
+      if (bytes < microphone_packet_header_size) {
+        return;
+      }
+
+      auto raw = reinterpret_cast<const std::uint8_t *>(microphone_buf.data());
+      if (read_be32(raw) != microphone_packet_magic || read_be16(raw + 6) != bytes) {
+        return;
+      }
+      auto connect_data = read_be32(raw + 8);
+
+      // Hold the session-list lock throughout processing so the control thread
+      // cannot retire this raw session pointer while a datagram is decoded.
+      auto sessions_lock = ctx.control_server._sessions.lock();
+      auto it = std::find_if(ctx.control_server._sessions->begin(), ctx.control_server._sessions->end(),
+                             [&](session_t *session) {
+                               return session->control.connect_data == connect_data &&
+                                      session->video.peer.address() == microphone_peer.address() &&
+                                      session->state.load(std::memory_order_acquire) == session::state_e::RUNNING;
+                             });
+      if (it == ctx.control_server._sessions->end()) {
+        return;
+      }
+
+      auto *session = *it;
+      if (!session->peer_features.count(ML_FEATURE_MICROPHONE) || !session->microphone.cipher) {
+        return;
+      }
+
+      microphone_packet_t packet;
+      if (!decode_microphone_packet(std::string_view {microphone_buf.data(), bytes},
+                                    *session->microphone.cipher, packet)) {
+        BOOST_LOG(warning) << "Rejected unauthenticated or malformed microphone packet from ["sv
+                           << session->device_name << ']';
+        return;
+      }
+      if (packet.channels != 1 || packet.samples != 960 ||
+          (session->microphone.has_sequence && packet.sequence <= session->microphone.last_sequence)) {
+        return;
+      }
+      auto recover_previous = session->microphone.has_sequence &&
+                              packet.sequence == session->microphone.last_sequence + 2;
+      session->microphone.last_sequence = packet.sequence;
+      session->microphone.has_sequence = true;
+
+      if (!session->microphone.decoder) {
+        int opus_error;
+        session->microphone.decoder = opus_decoder_create(48000, 1, &opus_error);
+        if (!session->microphone.decoder || opus_error != OPUS_OK) {
+          BOOST_LOG(error) << "Couldn't create microphone Opus decoder: "sv << opus_strerror(opus_error);
+          return;
+        }
+      }
+      if (!session->microphone.sink) {
+        session->microphone.sink = platf::virtual_microphone();
+        if (!session->microphone.sink) {
+          BOOST_LOG(error) << "No host virtual microphone is available for ["sv << session->device_name << ']';
+          return;
+        }
+      }
+
+      std::array<float, 960> pcm;
+      if (recover_previous) {
+        auto recovered = opus_decode_float(session->microphone.decoder, packet.opus.data(),
+                                           static_cast<opus_int32>(packet.opus.size()),
+                                           pcm.data(), pcm.size(), 1);
+        if (recovered > 0 && !session->microphone.sink->write(pcm.data(), recovered)) {
+          session->microphone.sink.reset();
+          return;
+        }
+      }
+      auto decoded = opus_decode_float(session->microphone.decoder, packet.opus.data(),
+                                       static_cast<opus_int32>(packet.opus.size()),
+                                       pcm.data(), pcm.size(), 0);
+      if (decoded != static_cast<int>(packet.samples)) {
+        BOOST_LOG(warning) << "Couldn't decode microphone Opus frame from ["sv << session->device_name
+                           << "]: decoder returned " << decoded << " samples, expected " << packet.samples;
+        return;
+      }
+      if (!session->microphone.sink->write(pcm.data(), decoded)) {
+        session->microphone.sink.reset();
+        return;
+      }
+      if (!session->microphone.first_frame_logged) {
+        BOOST_LOG(info) << "Receiving microphone audio from ["sv << session->device_name << ']';
+        session->microphone.first_frame_logged = true;
+      }
+    };
+
+    camera_recv_func = [&](const boost::system::error_code &ec, size_t bytes) {
+      auto fg = util::fail_guard([&]() {
+        camera_sock.async_receive_from(asio::buffer(camera_buf), camera_peer, 0, camera_recv_func);
+      });
+
+      if (ec == boost::system::errc::connection_refused || ec == boost::system::errc::connection_reset) return;
+      if (ec || bytes < camera_packet_header_size) {
+        if (ec) BOOST_LOG(error) << "Couldn't receive data from camera UDP socket: "sv << ec.message();
+        return;
+      }
+
+      auto raw = reinterpret_cast<const std::uint8_t *>(camera_buf.data());
+      if (read_be32(raw) != camera_packet_magic || read_be16(raw + 6) != bytes) return;
+      auto connect_data = read_be32(raw + 8);
+
+      auto sessions_lock = ctx.control_server._sessions.lock();
+      auto it = std::find_if(ctx.control_server._sessions->begin(), ctx.control_server._sessions->end(),
+                             [&](session_t *session) {
+                               return session->control.connect_data == connect_data &&
+                                      session->video.peer.address() == camera_peer.address() &&
+                                      session->state.load(std::memory_order_acquire) == session::state_e::RUNNING;
+                             });
+      if (it == ctx.control_server._sessions->end()) return;
+
+      auto *session = *it;
+      if (!session->peer_features.count(ML_FEATURE_CAMERA) || !session->camera.cipher) return;
+
+      camera_fragment_t fragment;
+      if (!decode_camera_fragment(std::string_view {camera_buf.data(), bytes},
+                                  *session->camera.cipher, fragment)) {
+        BOOST_LOG(warning) << "Rejected unauthenticated or malformed camera fragment from ["sv
+                           << session->device_name << ']';
+        return;
+      }
+
+      auto &camera = session->camera;
+      auto arrival_ms = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+      auto frame = camera.assembler.accept(fragment, arrival_ms);
+      if (!frame) return;
+
+      if (!camera.sink) camera.sink = platf::virtual_camera();
+      if (!camera.sink) {
+        BOOST_LOG(error) << "No host virtual camera is available for ["sv << session->device_name << ']';
+        return;
+      }
+      if (!camera.sink->write_mjpeg(frame->bytes.data(), frame->bytes.size(), frame->width,
+                                    frame->height, frame->timestamp_ms)) {
+        camera.sink.reset();
+        return;
+      }
+      if (!camera.first_frame_logged) {
+        BOOST_LOG(info) << "Receiving camera video from ["sv << session->device_name << ']';
+        camera.first_frame_logged = true;
+      }
+    };
+
     video_sock.async_receive_from(asio::buffer(buf[0]), peer, 0, recv_func[0]);
     audio_sock.async_receive_from(asio::buffer(buf[1]), peer, 0, recv_func[1]);
+    microphone_sock.async_receive_from(asio::buffer(microphone_buf), microphone_peer, 0, microphone_recv_func);
+    camera_sock.async_receive_from(asio::buffer(camera_buf), camera_peer, 0, camera_recv_func);
 
     while (!broadcast_shutdown_event->peek()) {
       io.run();
@@ -2242,6 +3540,8 @@ namespace stream {
     auto control_port = net::map_port(CONTROL_PORT);
     auto video_port = net::map_port(VIDEO_STREAM_PORT);
     auto audio_port = net::map_port(AUDIO_STREAM_PORT);
+    auto microphone_port = net::map_port(MICROPHONE_STREAM_PORT);
+    auto camera_port = net::map_port(CAMERA_STREAM_PORT);
 
     if (ctx.control_server.bind(address_family, control_port)) {
       BOOST_LOG(error) << "Couldn't bind Control server to port ["sv << control_port << "], likely another process already bound to the port"sv;
@@ -2285,6 +3585,28 @@ namespace stream {
       return -1;
     }
 
+    ctx.microphone_sock.open(protocol, ec);
+    if (ec) {
+      BOOST_LOG(fatal) << "Couldn't open socket for Microphone server: "sv << ec.message();
+      return -1;
+    }
+    ctx.microphone_sock.bind(udp::endpoint(protocol, microphone_port), ec);
+    if (ec) {
+      BOOST_LOG(fatal) << "Couldn't bind Microphone server to port ["sv << microphone_port << "]: "sv << ec.message();
+      return -1;
+    }
+
+    ctx.camera_sock.open(protocol, ec);
+    if (ec) {
+      BOOST_LOG(fatal) << "Couldn't open socket for Camera server: "sv << ec.message();
+      return -1;
+    }
+    ctx.camera_sock.bind(udp::endpoint(protocol, camera_port), ec);
+    if (ec) {
+      BOOST_LOG(fatal) << "Couldn't bind Camera server to port ["sv << camera_port << "]: "sv << ec.message();
+      return -1;
+    }
+
     ctx.message_queue_queue = std::make_shared<message_queue_queue_t::element_type>(30);
 
     ctx.video_thread = std::thread {videoBroadcastThread, std::ref(ctx.video_sock)};
@@ -2313,6 +3635,8 @@ namespace stream {
 
     ctx.video_sock.close();
     ctx.audio_sock.close();
+    ctx.microphone_sock.close();
+    ctx.camera_sock.close();
 
     video_packets.reset();
     audio_packets.reset();
@@ -2391,14 +3715,34 @@ namespace stream {
     while_starting_do_nothing(session->state);
 
     auto ref = broadcast.ref();
-    auto error = recv_ping(session, ref, socket_e::video, session->video.ping_payload, session->video.peer, config::stream.ping_timeout);
-    if (error < 0) {
+    auto ping_error = recv_ping(session, ref, socket_e::video, session->video.ping_payload, session->video.peer, config::stream.ping_timeout);
+    if (ping_error < 0) {
       return;
     }
 
     // Enable local prioritization and QoS tagging on video traffic if requested by the client
     auto address = session->video.peer.address();
     session->video.qos = platf::enable_socket_qos(ref->video_sock.native_handle(), address, session->video.peer.port(), platf::qos_data_type_e::video, session->config.videoQosType != 0);
+
+    if (session->config.indexed_display_topology) {
+      auto topology = session->display_topology;
+      std::unique_lock topology_lock {topology->mutex};
+      topology->ready_cv.wait_for(topology_lock, 5s, [session, &topology] {
+        return topology->ready ||
+               session->state.load(std::memory_order_relaxed) != stream::session::state_e::RUNNING;
+      });
+      auto selected_output = select_display_output(topology->output_names,
+                                                   session->config.display_index);
+      if (!selected_output) {
+        BOOST_LOG(error) << "Indexed display "sv << session->config.display_index
+                         << " was not materialised; refusing to capture a different output"sv;
+        return;
+      }
+      session->config.monitor.output_name = std::move(*selected_output);
+      BOOST_LOG(info) << "Indexed video stream "sv << session->config.display_index
+                      << " owns virtual output ["sv
+                      << session->config.monitor.output_name << ']';
+    }
 
     BOOST_LOG(debug) << "Start capturing Video"sv;
     video::capture(session->mail, session->config.monitor, session);
@@ -2434,6 +3778,29 @@ namespace stream {
 
     inline bool send(session_t& session, const std::string_view &payload) {
       return session.broadcast_ref->control_server.send(payload, session.control.peer);
+    }
+
+    void detach_slow_cleanup(const std::shared_ptr<session_t>& session) {
+      if (!session || (!session->system_disk_backend && !session->system_disk_tunnel)) {
+        return;
+      }
+
+      auto backend = std::move(session->system_disk_backend);
+      auto tunnel = std::move(session->system_disk_tunnel);
+      std::thread([keep_alive = session,
+                   backend = std::move(backend),
+                   tunnel = std::move(tunnel)]() mutable {
+        // Windows iSCSI detach can legitimately take longer than the stream
+        // watchdog. Keep both the tunnel and its session owner valid until the
+        // bounded detach/verification pass completes, without blocking the
+        // control or RTSP threads.
+        backend.reset();
+        tunnel.reset();
+      }).detach();
+    }
+
+    std::uint32_t launch_id(const session_t& session) {
+      return session.launch_session_id;
     }
 
     std::string uuid(const session_t& session) {
@@ -2521,11 +3888,11 @@ namespace stream {
         task_pool.cancel(force_kill);
       });
 
-      BOOST_LOG(debug) << "Waiting for video to end..."sv;
+      BOOST_LOG(info) << "Waiting for video to end..."sv;
       session.videoThread.join();
-      BOOST_LOG(debug) << "Waiting for audio to end..."sv;
+      BOOST_LOG(info) << "Waiting for audio to end..."sv;
       session.audioThread.join();
-      BOOST_LOG(debug) << "Waiting for control to end..."sv;
+      BOOST_LOG(info) << "Waiting for control to end..."sv;
       session.controlEnd.view();
       // Reset input on session stop to avoid stuck repeated keys
       BOOST_LOG(debug) << "Resetting Input..."sv;
@@ -2567,7 +3934,7 @@ namespace stream {
         platf::streaming_will_stop();
       }
 
-      BOOST_LOG(debug) << "Session ended"sv;
+      BOOST_LOG(info) << "Session ended"sv;
     }
 
     int start(session_t &session, const std::string &addr_string) {
@@ -2631,6 +3998,7 @@ namespace stream {
 
     std::shared_ptr<session_t> alloc(config_t &config, rtsp_stream::launch_session_t &launch_session) {
       auto session = std::make_shared<session_t>();
+      session->self = session;
 
       auto mail = std::make_shared<safe::mail_raw_t>();
 
@@ -2638,6 +4006,7 @@ namespace stream {
       session->launch_session_id = launch_session.id;
       session->device_name = launch_session.device_name;
       session->device_uuid = launch_session.unique_id;
+      session->display_topology = display_topology_for_device(session->device_uuid);
       session->permission = launch_session.perm;
 
       session->do_cmds = std::move(launch_session.client_do_cmds);
@@ -2650,6 +4019,14 @@ namespace stream {
       session->control.hdr_queue = mail->event<video::hdr_info_t>(mail::hdr);
       session->control.legacy_input_enc_iv = launch_session.iv;
       session->control.cipher = crypto::cipher::gcm_t {
+        launch_session.gcm_key,
+        false
+      };
+      session->microphone.cipher = crypto::cipher::gcm_t {
+        launch_session.gcm_key,
+        false
+      };
+      session->camera.cipher = crypto::cipher::gcm_t {
         launch_session.gcm_key,
         false
       };

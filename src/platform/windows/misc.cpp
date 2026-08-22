@@ -1889,9 +1889,17 @@ static std::wstring getClipboardData() {
     return L"";
   }
 
+  // An empty clipboard, or one containing only non-text formats, is a normal
+  // polling result. Do not emit a warning every second while a paired client
+  // is connected and there is simply no text to offer.
+  if (!IsClipboardFormatAvailable(CF_UNICODETEXT)) {
+    CloseClipboard();
+    return L"";
+  }
+
   HANDLE hData = GetClipboardData(CF_UNICODETEXT);
   if (hData == nullptr) {
-    BOOST_LOG(warning) << "No text data in clipboard or failed to get data.";
+    BOOST_LOG(warning) << "Failed to get advertised Unicode clipboard data.";
     CloseClipboard();
     return L"";
   }

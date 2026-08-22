@@ -1,13 +1,7 @@
 # Awesome-Helios
 
-@htmlonly
-<script type="module" src="https://md-block.verou.me/md-block.js"></script>
-<md-block
-  hlinks=""
-  hmin="2"
-  src="https://raw.githubusercontent.com/LizardByte/awesome-helios/master/README.md">
-</md-block>
-@endhtmlonly
+The former third-party “Awesome Helios” catalogue is not maintained for the Moonlight OS fork. See the
+[Helios repository](https://github.com/moonlight-os/helios) for current integrations and documentation.
 
 <div class="section_buttons">
 

@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://raw.githubusercontent.com/LizardByte/Helios/master/helios.png" />
+  <img src="https://raw.githubusercontent.com/moonlight-os/helios/main/helios.png" alt="Helios logo" />
   <h1 align="center">Helios</h1>
   <h4 align="center">Self-hosted game stream host for Moonlight.</h4>
 </div>
@@ -13,10 +13,5 @@
 
 Helios is a self-hosted game stream host for Moonlight.
 
-LizardByte has the full documentation hosted on [Read the Docs](https://docs.lizardbyte.dev/projects/helios)
-
-* [Stable](https://docs.lizardbyte.dev/projects/helios/latest/)
-* [Beta](https://docs.lizardbyte.dev/projects/helios/master/)
-
-This repo is synced from the upstream [Helios](https://github.com/LizardByte/Helios) repo.
-Please report issues and contribute to the upstream repo.
+Helios is the Moonlight OS streaming host. Source, documentation, and issue tracking are maintained in the
+[Moonlight OS Helios repository](https://github.com/moonlight-os/helios).

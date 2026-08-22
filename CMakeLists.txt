@@ -4,9 +4,9 @@ cmake_minimum_required(VERSION 3.20)
 # `cmake_path(CONVERT ... TO_NATIVE_PATH_LIST ...)` requires 3.20
 # todo - set this conditionally
 
-project(Helios VERSION 0.0.0
+project(Helios VERSION 0.1.0
         DESCRIPTION "Game stream host for Selene and Moonlight OS"
-        HOMEPAGE_URL "https://github.com/MopigamesYT/helios")
+        HOMEPAGE_URL "https://github.com/moonlight-os/helios")
 
 set(PROJECT_LICENSE "GPL-3.0-only")
 

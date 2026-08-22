@@ -238,6 +238,12 @@ editing the `conf` file in a text editor. Use the examples as reference.
     </tr>
 </table>
 
+### global_state_cmd
+
+Commands run when Helios starts and stopped when Helios exits. Use absolute
+paths and keep these commands idempotent so a restart cannot leave duplicate
+host state behind.
+
 ### notify_pre_releases
 
 <table>
@@ -283,6 +289,21 @@ editing the `conf` file in a text editor. Use the examples as reference.
             @endcode</td>
     </tr>
 </table>
+
+### hide_tray_controls
+
+Hide interactive controls from the tray menu while leaving the status icon
+available.
+
+### enable_pairing
+
+Allow new clients to start the PIN pairing flow. Disable this after pairing
+when the host should accept only clients that are already authorized.
+
+### enable_discovery
+
+Advertise this host for local-network discovery. Clients can still connect by
+address when discovery is disabled.
 
 ## Input
 
@@ -687,6 +708,15 @@ editing the `conf` file in a text editor. Use the examples as reference.
     </tr>
 </table>
 
+### enable_input_only_mode
+
+Allow sessions that send input without requesting a video stream.
+
+### forward_rumble
+
+Forward controller rumble feedback to the connected client when the platform
+and client both support it.
+
 ### keybindings
 
 <table>
@@ -873,6 +903,16 @@ editing the `conf` file in a text editor. Use the examples as reference.
     </tr>
 </table>
 
+### keep_sink_default
+
+Keep the selected virtual audio sink as the host's default while a stream is
+active.
+
+### auto_capture_sink
+
+Automatically select the current system output as the capture source when no
+explicit audio sink is configured.
+
 ### adapter_name
 
 <table>
@@ -1040,26 +1080,10 @@ editing the `conf` file in a text editor. Use the examples as reference.
     </tr>
 </table>
 
-### isolated_virtual_display_option
+### fallback_mode
 
-<table>
-    <tr>
-        <td>Description</td>
-        <td colspan="2">
-            Isolates the virtual display.
-            @note{Applies to Windows only.}
-        </td>
-    </tr>
-    <tr>
-        <td>Default</td>
-        <td colspan="2">@code{}disabled@endcode</td>
-    </tr>
-    <tr>
-        <td>enabled</td>
-        <td>Change the position of the virtual display (and other displays if there is a hole)</td>
-    </tr>
-</table>
-
+Select the compatible display path used when the preferred virtual-display
+mode cannot be prepared.
 
 ### dd_configuration_option
 
@@ -1416,6 +1440,16 @@ editing the `conf` file in a text editor. Use the examples as reference.
     </tr>
 </table>
 
+### headless_mode
+
+Create or select a capture surface without requiring a physical monitor.
+Availability depends on the host platform and graphics driver.
+
+### double_refreshrate
+
+Prefer a host display refresh rate twice the requested stream frame rate when
+a matching mode is available.
+
 ### max_bitrate
 
 <table>
@@ -1464,6 +1498,11 @@ editing the `conf` file in a text editor. Use the examples as reference.
         <td>Specify your own value. The real minimum may differ from this value.</td>
     </tr>
 </table>
+
+### isolated_virtual_display_option
+
+Isolate the Windows virtual display from the physical desktop layout. When
+enabled, Helios may reposition other displays to avoid gaps.
 
 ## Network
 
@@ -1930,6 +1969,24 @@ editing the `conf` file in a text editor. Use the examples as reference.
     </tr>
 </table>
 
+### limit_framerate
+
+Limit capture and encoding work to the requested stream frame rate.
+
+### envvar_compatibility_mode
+
+Use the legacy environment-variable format for applications that depend on
+the older launcher contract.
+
+### legacy_ordering
+
+Preserve the legacy order for client preparation and launch operations.
+
+### ignore_encoder_probe_failure
+
+Continue startup after an encoder probe fails. Use this only when the selected
+encoder is known to work despite an unreliable probe.
+
 ### hevc_mode
 
 <table>
@@ -2378,6 +2435,11 @@ editing the `conf` file in a text editor. Use the examples as reference.
             @endcode</td>
     </tr>
 </table>
+
+### nvenc_intra_refresh
+
+Use NVENC intra-refresh frames when supported, reducing reliance on full key
+frames after packet loss.
 
 ## Intel QuickSync Encoder
 

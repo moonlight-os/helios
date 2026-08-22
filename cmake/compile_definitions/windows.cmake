@@ -49,6 +49,7 @@ set_target_properties(helios_rc_object PROPERTIES
 )
 
 set(PLATFORM_TARGET_FILES
+        "${CMAKE_SOURCE_DIR}/src/platform/windows/camera.cpp"
         "${CMAKE_SOURCE_DIR}/src/platform/windows/publish.cpp"
         "${CMAKE_SOURCE_DIR}/src/platform/windows/misc.h"
         "${CMAKE_SOURCE_DIR}/src/platform/windows/misc.cpp"
@@ -96,6 +97,9 @@ list(PREPEND PLATFORM_LIBRARIES
         userenv
         ws2_32
         wsock32
+        windowscodecs
+        ole32
+        advapi32
 )
 
 if(SUNSHINE_ENABLE_TRAY)

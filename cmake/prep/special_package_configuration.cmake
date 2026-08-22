@@ -26,6 +26,7 @@ elseif(UNIX)
 
     # configure service
     configure_file(packaging/linux/helios.service.in helios.service @ONLY)
+    configure_file(packaging/linux/helios-usb-helper.service.in helios-usb-helper.service @ONLY)
 
     # configure the arch linux pkgbuild
     if(${SUNSHINE_CONFIGURE_PKGBUILD})

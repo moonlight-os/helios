@@ -310,8 +310,16 @@ namespace nvhttp {
     }
 
     std::string uid = tree["root"]["uniqueid"];
-    http::uuid = uuid_util::uuid_t::parse(uid);
-    http::unique_id = uid;
+    try {
+      http::uuid = uuid_util::uuid_t::parse(uid);
+      http::unique_id = uid;
+    }
+    catch (const std::invalid_argument &err) {
+      BOOST_LOG(warning) << "Ignoring invalid host UUID in "sv
+                         << config::nvhttp.file_state << ": "sv << err.what();
+      http::uuid = uuid_util::uuid_t::generate();
+      http::unique_id = http::uuid.string();
+    }
 
     nlohmann::json root = tree["root"];
     client_t client;  // Local client to load into
@@ -400,6 +408,16 @@ namespace nvhttp {
         launch_session->rtsp_iv_counter = 0;
       }
       launch_session->rtsp_url_scheme = launch_session->rtsp_cipher ? "rtspenc://"s : "rtsp://"s;
+
+      if (quic_transport::available() &&
+          quic_transport::requested(get_arg(args, "mlosQuic", "0"))) {
+        launch_session->quic_ticket = quic_transport::issue_ticket(
+          named_cert_p->cert, launch_session->id);
+        if (!launch_session->quic_ticket) {
+          BOOST_LOG(warning) << "QUIC requested by ["sv << named_cert_p->name
+                             << "] but its paired certificate could not be fingerprinted"sv;
+        }
+      }
 
       // Generate the unique identifiers for this connection that we will send later during RTSP handshake
       unsigned char raw_payload[8];
@@ -1337,15 +1355,15 @@ namespace nvhttp {
     }
 
     tree.put("root.<xmlattr>.status_code", 200);
-    tree.put(
-      "root.sessionUrl0",
-      std::format(
-        "{}{}:{}",
-        launch_session->rtsp_url_scheme,
-        net::addr_to_url_escaped_string(request->local_endpoint().address()),
-        static_cast<int>(net::map_port(rtsp_stream::RTSP_SETUP_PORT))
-      )
-    );
+    const auto escaped_host = net::addr_to_url_escaped_string(request->local_endpoint().address());
+    if (launch_session->quic_ticket) {
+      quic_transport::ticket_registry().insert(*launch_session->quic_ticket);
+    }
+    tree.put("root.sessionUrl0", launch_session->quic_ticket
+      ? quic_transport::session_url(escaped_host, net::map_port(quic_transport::PORT),
+                                    launch_session->quic_ticket->token)
+      : std::format("{}{}:{}", launch_session->rtsp_url_scheme, escaped_host,
+                    static_cast<int>(net::map_port(rtsp_stream::RTSP_SETUP_PORT))));
     tree.put("root.gamesession", 1);
 
     rtsp_stream::launch_session_raise(launch_session);
@@ -1444,15 +1462,15 @@ namespace nvhttp {
     }
 
     tree.put("root.<xmlattr>.status_code", 200);
-    tree.put(
-      "root.sessionUrl0",
-      std::format(
-        "{}{}:{}",
-        launch_session->rtsp_url_scheme,
-        net::addr_to_url_escaped_string(request->local_endpoint().address()),
-        static_cast<int>(net::map_port(rtsp_stream::RTSP_SETUP_PORT))
-      )
-    );
+    const auto escaped_host = net::addr_to_url_escaped_string(request->local_endpoint().address());
+    if (launch_session->quic_ticket) {
+      quic_transport::ticket_registry().insert(*launch_session->quic_ticket);
+    }
+    tree.put("root.sessionUrl0", launch_session->quic_ticket
+      ? quic_transport::session_url(escaped_host, net::map_port(quic_transport::PORT),
+                                    launch_session->quic_ticket->token)
+      : std::format("{}{}:{}", launch_session->rtsp_url_scheme, escaped_host,
+                    static_cast<int>(net::map_port(rtsp_stream::RTSP_SETUP_PORT))));
     tree.put("root.resume", 1);
 
     rtsp_stream::launch_session_raise(launch_session);

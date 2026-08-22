@@ -20,7 +20,7 @@ endif()
 if((DEFINED ENV{BRANCH}) AND (DEFINED ENV{BUILD_VERSION}))  # cmake-lint: disable=W0106
     if((DEFINED ENV{BRANCH}) AND (NOT $ENV{BUILD_VERSION} STREQUAL ""))
         # If BRANCH is defined and BUILD_VERSION is not empty, then we are building from CI
-        # If BRANCH is master we are building a push/release build
+        # If BRANCH is main we are building a push/release build
         MESSAGE("Got from CI '$ENV{BRANCH}' branch and version '$ENV{BUILD_VERSION}'")
         set(PROJECT_VERSION $ENV{BUILD_VERSION})
         string(REGEX REPLACE "^v" "" PROJECT_VERSION ${PROJECT_VERSION})  # remove the v prefix if it exists
@@ -55,7 +55,7 @@ else()
         )
         if(NOT GIT_DESCRIBE_ERROR_CODE)
             MESSAGE("Helios Branch: ${GIT_DESCRIBE_BRANCH}")
-            if(NOT GIT_DESCRIBE_BRANCH STREQUAL "master")
+            if(NOT GIT_DESCRIBE_BRANCH STREQUAL "main")
                 set(PROJECT_VERSION ${PROJECT_VERSION}.${GIT_DESCRIBE_VERSION})
                 MESSAGE("Helios Version: ${GIT_DESCRIBE_VERSION}")
             endif()

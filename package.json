@@ -1,6 +1,6 @@
 {
   "name": "helios",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "scripts": {
     "build": "vite build --debug",
     "build-clean": "vite build --debug --emptyOutDir",
@@ -14,10 +14,10 @@
     "vue-i18n": "11.1.12"
   },
   "devDependencies": {
-    "@codecov/vite-plugin": "1.9.1",
+    "@codecov/vite-plugin": "2.0.1",
     "@vitejs/plugin-vue": "6.0.1",
-    "serve": "14.2.5",
-    "vite": "6.3.6",
+    "serve": "14.2.6",
+    "vite": "6.4.3",
     "vite-plugin-ejs": "1.7.0"
   }
 }

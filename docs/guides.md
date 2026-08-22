@@ -1,9 +1,9 @@
 # Guides
 
-@admonition{Community | A collection of guides written by the community is available on our
-[blog](https://app.lizardbyte.dev/blog).
-Feel free to contribute your own tips and trips by making a PR to
-[LizardByte.github.io](https://github.com/LizardByte/LizardByte.github.io).}
+Moonlight OS guidance is maintained alongside the code. Start with
+[Getting Started](getting_started.md), then see [Configuration](configuration.md) and
+[Troubleshooting](troubleshooting.md). Corrections are welcome in the
+[Helios repository](https://github.com/moonlight-os/helios).
 
 <div class="section_buttons">
 

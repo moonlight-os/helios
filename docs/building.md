@@ -15,10 +15,9 @@ It is recommended to use one of the following compilers:
 ### Dependencies
 
 #### Linux
-Dependencies vary depending on the distribution. You can reference our
-[linux_build.sh](https://github.com/LizardByte/Sunshine/blob/master/scripts/linux_build.sh) script for a list of
-dependencies we use in Debian-based and Fedora-based distributions. Please submit a PR if you would like to extend the
-script to support other distributions.
+Dependencies vary by distribution. The authoritative package list is maintained in the
+[Linux CI workflow](https://github.com/moonlight-os/helios/blob/main/.github/workflows/build.yml) and the packaging
+files under `packaging/linux`.
 
 ##### CUDA Toolkit
 Helios requires CUDA Toolkit for NVFBC capture. There are two caveats to CUDA:
@@ -129,8 +128,8 @@ visible to CMake.
 Ensure [git](https://git-scm.com) is installed on your system, then clone the repository using the following command:
 
 ```bash
-git clone https://github.com/ClassicOldSong/Apollo.git --recurse-submodules
-cd Helios
+git clone https://github.com/moonlight-os/helios.git --recurse-submodules
+cd helios
 mkdir build
 ```
 
@@ -143,7 +142,7 @@ ninja -C build
 
 > [!TIP]
 > Available build options can be found in
-> [options.cmake](https://github.com/LizardByte/Sunshine/blob/master/cmake/prep/options.cmake).
+> [options.cmake](https://github.com/moonlight-os/helios/blob/main/cmake/prep/options.cmake).
 
 ### Package
 

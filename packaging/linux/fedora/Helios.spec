@@ -12,7 +12,7 @@ Version: %{build_version}
 Release: 1%{?dist}
 Summary: Self-hosted game stream host for Moonlight.
 License: GPLv3-only
-URL: https://github.com/LizardByte/Sunshine
+URL: https://github.com/moonlight-os/helios
 Source0: tarball.tar.gz
 
 BuildRequires: appstream
@@ -81,10 +81,12 @@ Requires: libopusenc >= 0.2.1
 Requires: libva >= 2.14.0
 Requires: libwayland-client >= 1.20.0
 Requires: libX11 >= 1.7.3.1
+Requires: iscsi-initiator-utils
 Requires: miniupnpc >= 2.2.4
 Requires: numactl-libs >= 2.0.14
 Requires: openssl >= 3.0.2
 Requires: pulseaudio-libs >= 10.0
+Requires: usbip
 Requires: which >= 2.21
 
 %description
@@ -121,7 +123,7 @@ cmake_args=(
   "-DSUNSHINE_ENABLE_WAYLAND=ON"
   "-DSUNSHINE_ENABLE_X11=ON"
   "-DSUNSHINE_ENABLE_DRM=ON"
-  "-DSUNSHINE_PUBLISHER_NAME=LizardByte"
+  "-DSUNSHINE_PUBLISHER_NAME=Moonlight OS"
   "-DSUNSHINE_PUBLISHER_WEBSITE=https://app.lizardbyte.dev"
   "-DSUNSHINE_PUBLISHER_ISSUE_URL=https://app.lizardbyte.dev/support"
 )
@@ -217,6 +219,13 @@ cd %{_builddir}/Helios/build
 # Load uhid (DS5 emulation)
 echo "Loading uhid kernel module for DS5 emulation."
 modprobe uhid
+modprobe vhci-hcd 2>/dev/null || modprobe vhci_hcd 2>/dev/null || true
+for legacy_unit in mlos-host-utils.service moonlight-os-host-utils.service; do
+  systemctl disable --now "$legacy_unit" >/dev/null 2>&1 || true
+done
+systemctl daemon-reload
+systemctl enable helios-usb-helper.service >/dev/null 2>&1 || true
+systemctl restart helios-usb-helper.service || true
 
 # Check if we're in an rpm-ostree environment
 if [ ! -x "$(command -v rpm-ostree)" ]; then
@@ -244,6 +253,7 @@ fi
 
 # Systemd unit file for user services
 %{_userunitdir}/helios.service
+%{_unitdir}/helios-usb-helper.service
 
 # Udev rules
 %{_udevrulesdir}/*-helios.rules

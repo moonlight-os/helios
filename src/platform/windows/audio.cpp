@@ -6,6 +6,9 @@
 
 // standard includes
 #include <format>
+#include <condition_variable>
+#include <cwctype>
+#include <deque>
 
 // platform includes
 #include <Audioclient.h>
@@ -40,6 +43,7 @@ namespace {
 
   constexpr auto SAMPLE_RATE = 48000;
   constexpr auto STEAM_AUDIO_DRIVER_PATH = L"%CommonProgramFiles(x86)%\\Steam\\drivers\\Windows10\\" STEAM_DRIVER_SUBDIR L"\\SteamStreamingSpeakers.inf";
+  constexpr auto STEAM_MICROPHONE_DRIVER_PATH = L"%CommonProgramFiles(x86)%\\Steam\\drivers\\Windows10\\" STEAM_DRIVER_SUBDIR L"\\SteamStreamingMicrophone.inf";
 
   constexpr auto waveformat_mask_stereo = SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT;
 
@@ -218,6 +222,7 @@ namespace platf::audio {
   using collection_t = util::safe_ptr<IMMDeviceCollection, Release<IMMDeviceCollection>>;
   using audio_client_t = util::safe_ptr<IAudioClient, Release<IAudioClient>>;
   using audio_capture_t = util::safe_ptr<IAudioCaptureClient, Release<IAudioCaptureClient>>;
+  using audio_render_t = util::safe_ptr<IAudioRenderClient, Release<IAudioRenderClient>>;
   using wave_format_t = util::safe_ptr<WAVEFORMATEX, co_task_free<WAVEFORMATEX>>;
   using wstring_t = util::safe_ptr<WCHAR, co_task_free<WCHAR>>;
   using handle_t = util::safe_ptr_v2<void, BOOL, CloseHandle>;
@@ -682,6 +687,174 @@ namespace platf::audio {
     HANDLE mmcss_task_handle = nullptr;
   };
 
+  class virtual_microphone_wasapi_t: public virtual_microphone_t {
+  public:
+    bool init() {
+      worker = std::thread {[this]() { run(); }};
+      std::unique_lock<std::mutex> lock(mutex);
+      ready_cv.wait(lock, [this]() { return ready; });
+      return initialized;
+    }
+
+    bool write(const float *samples, std::size_t frame_count) override {
+      std::lock_guard<std::mutex> lock(mutex);
+      if (!initialized || stopping) {
+        return false;
+      }
+      constexpr std::size_t max_queued_frames = SAMPLE_RATE;
+      if (frames.size() + frame_count > max_queued_frames) {
+        frames.erase(frames.begin(), frames.begin() +
+                     std::min(frames.size(), frames.size() + frame_count - max_queued_frames));
+      }
+      frames.insert(frames.end(), samples, samples + frame_count);
+      data_cv.notify_one();
+      return true;
+    }
+
+    ~virtual_microphone_wasapi_t() override {
+      {
+        std::lock_guard<std::mutex> lock(mutex);
+        stopping = true;
+        data_cv.notify_one();
+      }
+      if (worker.joinable()) {
+        worker.join();
+      }
+    }
+
+  private:
+    static bool contains(std::wstring value, std::wstring needle) {
+      std::transform(value.begin(), value.end(), value.begin(), ::towlower);
+      std::transform(needle.begin(), needle.end(), needle.begin(), ::towlower);
+      return value.find(needle) != std::wstring::npos;
+    }
+
+    device_t find_steam_microphone(device_enum_t &enumerator) {
+      collection_t devices;
+      if (FAILED(enumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &devices))) {
+        return nullptr;
+      }
+      UINT count = 0;
+      devices->GetCount(&count);
+      for (UINT i = 0; i < count; ++i) {
+        device_t device;
+        if (FAILED(devices->Item(i, &device))) {
+          continue;
+        }
+        prop_t properties;
+        if (FAILED(device->OpenPropertyStore(STGM_READ, &properties))) {
+          continue;
+        }
+        for (const auto &key : {PKEY_Device_FriendlyName, PKEY_DeviceInterface_FriendlyName, PKEY_Device_DeviceDesc}) {
+          prop_var_t value;
+          if (SUCCEEDED(properties->GetValue(key, &value.prop)) && value.prop.vt == VT_LPWSTR &&
+              value.prop.pwszVal && contains(value.prop.pwszVal, L"Steam Streaming Microphone")) {
+            return device;
+          }
+        }
+      }
+      return nullptr;
+    }
+
+    void signal_ready(bool success) {
+      std::lock_guard<std::mutex> lock(mutex);
+      initialized = success;
+      ready = true;
+      ready_cv.notify_one();
+    }
+
+    void run() {
+      auto co_status = CoInitializeEx(nullptr, COINIT_MULTITHREADED | COINIT_SPEED_OVER_MEMORY);
+      auto co_initialized = SUCCEEDED(co_status);
+
+      device_enum_t enumerator;
+      auto status = CoCreateInstance(CLSID_MMDeviceEnumerator, nullptr, CLSCTX_ALL,
+                                     IID_IMMDeviceEnumerator, (void **) &enumerator);
+      if (FAILED(status)) {
+        BOOST_LOG(error) << "Couldn't enumerate Windows virtual microphones: [0x"sv
+                         << util::hex(status).to_string_view() << ']';
+        signal_ready(false);
+        if (co_initialized) CoUninitialize();
+        return;
+      }
+      auto device = find_steam_microphone(enumerator);
+      if (!device) {
+        BOOST_LOG(error) << "Steam Streaming Microphone playback endpoint was not found"sv;
+        signal_ready(false);
+        if (co_initialized) CoUninitialize();
+        return;
+      }
+
+      audio_client_t client;
+      status = device->Activate(IID_IAudioClient, CLSCTX_ALL, nullptr, (void **) &client);
+      auto format = create_waveformat(sample_format_e::f32, 2, waveformat_mask_stereo);
+      if (SUCCEEDED(status)) {
+        status = client->Initialize(AUDCLNT_SHAREMODE_SHARED,
+                                    AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
+                                    0, 0, reinterpret_cast<WAVEFORMATEX *>(&format), nullptr);
+      }
+      UINT32 buffer_frames = 0;
+      audio_render_t render;
+      if (SUCCEEDED(status)) status = client->GetBufferSize(&buffer_frames);
+      if (SUCCEEDED(status)) status = client->GetService(IID_IAudioRenderClient, (void **) &render);
+      if (SUCCEEDED(status)) status = client->Start();
+      if (FAILED(status)) {
+        BOOST_LOG(error) << "Couldn't open Steam Streaming Microphone for playback: [0x"sv
+                         << util::hex(status).to_string_view() << ']';
+        signal_ready(false);
+        if (co_initialized) CoUninitialize();
+        return;
+      }
+
+      BOOST_LOG(info) << "Steam Streaming Microphone is ready for client microphone audio"sv;
+      signal_ready(true);
+      while (true) {
+        std::unique_lock<std::mutex> lock(mutex);
+        data_cv.wait_for(lock, 5ms, [this]() { return stopping || !frames.empty(); });
+        if (stopping) {
+          break;
+        }
+        UINT32 padding = 0;
+        if (FAILED(client->GetCurrentPadding(&padding))) {
+          initialized = false;
+          break;
+        }
+        auto count = std::min<std::size_t>(frames.size(), buffer_frames - padding);
+        if (!count) {
+          continue;
+        }
+        BYTE *raw = nullptr;
+        if (FAILED(render->GetBuffer(static_cast<UINT32>(count), &raw))) {
+          initialized = false;
+          break;
+        }
+        auto *output = reinterpret_cast<float *>(raw);
+        for (std::size_t i = 0; i < count; ++i) {
+          output[i * 2] = frames[i];
+          output[i * 2 + 1] = frames[i];
+        }
+        frames.erase(frames.begin(), frames.begin() + count);
+        lock.unlock();
+        if (FAILED(render->ReleaseBuffer(static_cast<UINT32>(count), 0))) {
+          std::lock_guard<std::mutex> failure_lock(mutex);
+          initialized = false;
+          break;
+        }
+      }
+      client->Stop();
+      if (co_initialized) CoUninitialize();
+    }
+
+    std::mutex mutex;
+    std::condition_variable ready_cv;
+    std::condition_variable data_cv;
+    std::deque<float> frames;
+    std::thread worker;
+    bool ready = false;
+    bool initialized = false;
+    bool stopping = false;
+  };
+
   class audio_control_t: public ::platf::audio_control_t {
   public:
     std::optional<sink_t> sink_info() override {
@@ -896,6 +1069,12 @@ namespace platf::audio {
       };
     }
 
+    audio_control_t::match_fields_list_t match_steam_microphone() {
+      return {
+        {match_field_e::adapter_friendly_name, L"Steam Streaming Microphone"}
+      };
+    }
+
     audio_control_t::match_fields_list_t match_all_fields(const std::wstring &name) {
       return {
         {match_field_e::device_id, name},  // {0.0.0.00000000}.{29dd7668-45b2-4846-882d-950f55bf7eb8}
@@ -1067,11 +1246,37 @@ namespace platf::audio {
       // Get the current default audio device (if present)
       auto old_default_dev = default_device(device_enum);
 
-      // Install the Steam Streaming Speakers driver
-      WCHAR driver_path[MAX_PATH] = {};
-      ExpandEnvironmentStringsW(STEAM_AUDIO_DRIVER_PATH, driver_path, ARRAYSIZE(driver_path));
-      if (fn_DiInstallDriverW(nullptr, driver_path, 0, nullptr)) {
-        BOOST_LOG(info) << "Successfully installed Steam Streaming Speakers"sv;
+      auto install_driver = [&](const wchar_t *path, const char *name) {
+        WCHAR driver_path[MAX_PATH] = {};
+        ExpandEnvironmentStringsW(path, driver_path, ARRAYSIZE(driver_path));
+        if (fn_DiInstallDriverW(nullptr, driver_path, 0, nullptr)) {
+          BOOST_LOG(info) << "Successfully installed "sv << name;
+          return true;
+        }
+        auto err = GetLastError();
+        switch (err) {
+          case ERROR_ACCESS_DENIED:
+            BOOST_LOG(warning) << "Administrator privileges are required to install "sv << name;
+            break;
+          case ERROR_FILE_NOT_FOUND:
+          case ERROR_PATH_NOT_FOUND:
+            BOOST_LOG(info) << "Steam audio drivers not found. This is expected if you don't have Steam installed."sv;
+            break;
+          default:
+            BOOST_LOG(warning) << "Failed to install "sv << name << ": " << err;
+            break;
+        }
+        return false;
+      };
+
+      bool changed = false;
+      if (!find_device_id(match_steam_speakers())) {
+        changed = install_driver(STEAM_AUDIO_DRIVER_PATH, "Steam Streaming Speakers") || changed;
+      }
+      if (!find_device_id(match_steam_microphone())) {
+        changed = install_driver(STEAM_MICROPHONE_DRIVER_PATH, "Steam Streaming Microphone") || changed;
+      }
+      if (changed) {
 
         // Wait for 5 seconds to allow the audio subsystem to reconfigure things before
         // modifying the default audio device or enumerating devices again.
@@ -1088,24 +1293,8 @@ namespace platf::audio {
           }
         }
 
-        return true;
-      } else {
-        auto err = GetLastError();
-        switch (err) {
-          case ERROR_ACCESS_DENIED:
-            BOOST_LOG(warning) << "Administrator privileges are required to install Steam Streaming Speakers"sv;
-            break;
-          case ERROR_FILE_NOT_FOUND:
-          case ERROR_PATH_NOT_FOUND:
-            BOOST_LOG(info) << "Steam audio drivers not found. This is expected if you don't have Steam installed."sv;
-            break;
-          default:
-            BOOST_LOG(warning) << "Failed to install Steam audio drivers: "sv << err;
-            break;
-        }
-
-        return false;
       }
+      return changed;
 #else
       BOOST_LOG(warning) << "Unable to install Steam Streaming Speakers on unknown architecture"sv;
       return false;
@@ -1168,12 +1357,22 @@ namespace platf {
 
     // Install Steam Streaming Speakers if needed. We do this during audio_control() to ensure
     // the sink information returned includes the new Steam Streaming Speakers device.
-    if (config::audio.install_steam_drivers && !control->find_device_id(control->match_steam_speakers())) {
+    if (config::audio.install_steam_drivers &&
+        (!control->find_device_id(control->match_steam_speakers()) ||
+         !control->find_device_id(control->match_steam_microphone()))) {
       // This is best effort. Don't fail if it doesn't work.
       control->install_steam_audio_drivers();
     }
 
     return control;
+  }
+
+  std::unique_ptr<virtual_microphone_t> virtual_microphone() {
+    auto microphone = std::make_unique<audio::virtual_microphone_wasapi_t>();
+    if (!microphone->init()) {
+      return nullptr;
+    }
+    return microphone;
   }
 
   std::unique_ptr<deinit_t> init() {

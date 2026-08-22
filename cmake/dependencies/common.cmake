@@ -22,6 +22,23 @@ find_package(PkgConfig REQUIRED)
 find_package(Threads REQUIRED)
 pkg_check_modules(CURL REQUIRED libcurl)
 
+# M7 is optional at build time so ordinary Helios builds retain the vanilla
+# transports when MsQuic is not packaged. Release builds provide the runtime
+# and use the audited, vendored API header pinned with the package version.
+option(ENABLE_MLOS_QUIC "Enable Moonlight OS QUIC transport when MsQuic is available" ON)
+if(ENABLE_MLOS_QUIC)
+    find_library(MSQUIC_LIBRARY NAMES msquic libmsquic.so.2)
+    if(MSQUIC_LIBRARY)
+        message(STATUS "Moonlight OS QUIC enabled with ${MSQUIC_LIBRARY}")
+        set(MLOS_QUIC_ENABLED ON)
+        include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/third-party/msquic/include")
+        list(APPEND SUNSHINE_EXTERNAL_LIBRARIES ${MSQUIC_LIBRARY})
+        list(APPEND SUNSHINE_DEFINITIONS HAVE_MSQUIC=1)
+    else()
+        message(STATUS "MsQuic runtime not found; Moonlight OS QUIC transport disabled")
+    endif()
+endif()
+
 # miniupnp
 pkg_check_modules(MINIUPNP miniupnpc REQUIRED)
 include_directories(SYSTEM ${MINIUPNP_INCLUDE_DIRS})

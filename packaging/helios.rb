@@ -83,7 +83,7 @@ class @PROJECT_NAME@ < Formula
       -DOPENSSL_ROOT_DIR=#{Formula["openssl"].opt_prefix}
       -DSUNSHINE_ASSETS_DIR=helios/assets
       -DSUNSHINE_BUILD_HOMEBREW=ON
-      -DSUNSHINE_PUBLISHER_NAME='LizardByte'
+      -DSUNSHINE_PUBLISHER_NAME='Moonlight OS'
       -DSUNSHINE_PUBLISHER_WEBSITE='https://app.lizardbyte.dev'
       -DSUNSHINE_PUBLISHER_ISSUE_URL='https://app.lizardbyte.dev/support'
     ]

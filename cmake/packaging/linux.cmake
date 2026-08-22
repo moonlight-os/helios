@@ -29,6 +29,8 @@ else()
     if(SYSTEMD_FOUND)
         install(FILES "${CMAKE_CURRENT_BINARY_DIR}/helios.service"
                 DESTINATION "${SYSTEMD_USER_UNIT_INSTALL_DIR}")
+        install(FILES "${CMAKE_CURRENT_BINARY_DIR}/helios-usb-helper.service"
+                DESTINATION "${SYSTEMD_SYSTEM_UNIT_INSTALL_DIR}")
         install(FILES "${SUNSHINE_SOURCE_ASSETS_DIR}/linux/misc/60-helios.conf"
                 DESTINATION "${SYSTEMD_MODULES_LOAD_DIR}")
     endif()
@@ -61,6 +63,11 @@ set(CPACK_DEBIAN_PACKAGE_DEPENDS "\
             libx11-6, \
             miniupnpc, \
             openssl | libssl3")
+set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "open-iscsi, usbip | linux-tools-generic")
+if(MLOS_QUIC_ENABLED)
+    set(CPACK_DEBIAN_PACKAGE_DEPENDS
+        "${CPACK_DEBIAN_PACKAGE_DEPENDS}, libmsquic (>= 2.5.9)")
+endif()
 set(CPACK_RPM_PACKAGE_REQUIRES "\
             ${CPACK_RPM_PLATFORM_PACKAGE_REQUIRES} \
             libcap >= 2.22, \
@@ -71,11 +78,13 @@ set(CPACK_RPM_PACKAGE_REQUIRES "\
             libva >= 2.14.0, \
             libwayland-client >= 1.20.0, \
             libX11 >= 1.7.3.1, \
+            iscsi-initiator-utils, \
             mesa-libgbm >= 25.0.7, \
             miniupnpc >= 2.2.4, \
             numactl-libs >= 2.0.14, \
             openssl >= 3.0.2, \
             pulseaudio-libs >= 10.0, \
+            usbip, \
             which >= 2.21")
 
 if(NOT BOOST_USE_STATIC)

@@ -62,6 +62,12 @@ jobs:
             libxcb1-dev libxfixes-dev libxrandr-dev libxtst-dev \
             ninja-build npm udev wget xvfb
 
+      - name: Install pinned MsQuic runtime
+        run: |
+          wget -q https://packages.microsoft.com/ubuntu/24.04/prod/pool/main/libm/libmsquic/libmsquic_2.5.9_amd64.deb -O /tmp/libmsquic.deb
+          echo "5f2107d3b682cc008ec248e93bc4c00dc4ac674f2e1d4bd5c830bf2d1f1b60a1  /tmp/libmsquic.deb" | sha256sum -c -
+          sudo apt-get install -y /tmp/libmsquic.deb
+
       - name: Configure
         env:
           CC: gcc-${{ matrix.gcc }}
@@ -86,27 +92,11 @@ jobs:
       - name: Build
         run: cmake --build build -j"$(nproc)"
 
-      # Two suites fail and one aborts the whole run, all inherited from Apollo
-      # and none caused by the fork. They are excluded so the rest actually
-      # gate, rather than the job being permanently red and ignored. Measured
-      # locally against this exclusion list: 73 run, 68 pass, 5 skip -- the
-      # skips are environment-dependent (no encoder, inputtino unimplemented),
-      # so expect the split to move a little on a runner, not the pass/fail:
-      #
-      #   ConfigConsistencyTest   - config options out of sync between files
-      #   DisplayDeviceConfigTest - refresh-rate parsing and mode remapping
-      #   PairingTest             - fixture uses uniqueID "1234", which Apollo's
-      #                             newer code rejects as an invalid UUID
-      #
-      # Fixing these is tracked separately. Do not add to this list to make a
-      # red build green -- a new failure here is a real regression.
       - name: Test
         working-directory: build/tests
         # Headless runner: parts of the suite touch X, which is why
         # linux_build.sh lists xvfb as a dependency.
-        run: >
-          xvfb-run -a ./test_helios --gtest_color=yes
-          --gtest_filter=-ConfigConsistencyTest.*:DisplayDeviceConfigTest/*:*PairingTest*
+        run: xvfb-run -a ./test_helios --gtest_color=yes
 
       - name: Upload the binary
         if: always()
@@ -170,6 +160,7 @@ jobs:
           path-type: inherit
           install: >-
             git
+            unzip
           # Mirrors the dependency list in docs/building.md, minus the ones it
           # marks optional (doxygen and graphviz, which only build the docs)
           # and minus boost. Two notes:
@@ -199,6 +190,18 @@ jobs:
             opus:p
             toolchain:p
 
+      - name: Build Windows 11 virtual camera source
+        run: >-
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+          "$(cygpath -w src_assets/windows/misc/camera/build-camera-source.ps1)"
+
+      - name: Prepare pinned MsQuic runtime
+        run: |
+          curl -fL https://api.nuget.org/v3-flatcontainer/microsoft.native.quic.msquic.openssl/2.5.10/microsoft.native.quic.msquic.openssl.2.5.10.nupkg -o /tmp/msquic.zip
+          echo "893b1be02f2d965a24ce319b4acd6ff95294d33c819614c4125cdcf83bd33cd5  /tmp/msquic.zip" | sha256sum -c -
+          mkdir -p build-deps-msquic
+          unzip -q /tmp/msquic.zip -d build-deps-msquic
+
       - name: Configure
         # No CUDA_FAIL_ON_MISSING here, unlike the Linux job: the CUDA options
         # are only declared under UNIX, and Windows reaches NVENC through the
@@ -206,22 +209,16 @@ jobs:
         run: |
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_TESTS=ON
+            -DBUILD_TESTS=ON \
+            -DMSQUIC_LIBRARY="$PWD/build-deps-msquic/build/native/lib/x64/msquic.lib" \
+            -DMSQUIC_RUNTIME_LIBRARY="$PWD/build-deps-msquic/build/native/bin/x64/msquic.dll"
 
       - name: Build
         run: cmake --build build -j"$(nproc)"
 
-      # Same three exclusions as the Linux job, for the same reason: all three
-      # are inherited from Apollo and none are fork-caused. Expect a different
-      # pass/skip split than Linux's 68/5, since more of the suite depends on
-      # the environment here and the runner has no GPU capture path. A failure
-      # is still a real regression, so do not extend this filter to turn a red
-      # build green.
       - name: Test
         working-directory: build/tests
-        run: >
-          ./test_helios.exe --gtest_color=yes
-          --gtest_filter=-ConfigConsistencyTest.*:DisplayDeviceConfigTest/*:*PairingTest*
+        run: ./test_helios.exe --gtest_color=yes
 
       # The bare .exe is not much use on its own -- it needs the assets, the
       # tools, the service and the drivers next to it -- so CI produces the

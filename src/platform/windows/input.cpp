@@ -1762,6 +1762,8 @@ namespace platf {
    */
   platform_caps::caps_t get_capabilities() {
     platform_caps::caps_t caps = 0;
+    caps |= platform_caps::microphone_uplink;
+    if (virtual_camera_available()) caps |= platform_caps::camera_uplink;
 
     // We support controller touchpad input as long as we're not emulating X360
     if (config::input.gamepad != "x360"sv) {

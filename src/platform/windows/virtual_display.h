@@ -22,9 +22,10 @@ namespace VDISPLAY {
 
 	extern HANDLE SUDOVDA_DRIVER_HANDLE;
 
-	LONG getDeviceSettings(const wchar_t* deviceName, DEVMODEW& devMode);
+	bool getDeviceSettings(const wchar_t* deviceName, DEVMODEW& devMode);
 	LONG changeDisplaySettings(const wchar_t* deviceName, int width, int height, int refresh_rate);
 	LONG changeDisplaySettings2(const wchar_t* deviceName, int width, int height, int refresh_rate, bool bApplyIsolated=false);	
+	LONG changeDisplayPosition(const wchar_t* deviceName, int x, int y);
 	std::wstring getPrimaryDisplay();
 	bool setPrimaryDisplay(const wchar_t* primaryDeviceName);
 	bool getDisplayHDRByName(const wchar_t* displayName);
