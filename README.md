@@ -29,6 +29,10 @@ Runtime settings are available from Helios's local web interface. The first
 paired client receives administrative permissions; later clients begin with
 view and app-list access until an administrator grants more.
 
+Windows service installations can apply cryptographically signed releases from
+the Home page. See [Updating Helios](docs/updating.md) for signature validation,
+staging, health checks, and rollback behaviour.
+
 ## Virtual displays
 
 Helios gives each paired client a stable display identity so its layout can be

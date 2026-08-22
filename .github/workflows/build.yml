@@ -18,6 +18,7 @@ permissions:
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -127,6 +128,12 @@ jobs:
         # unaffected, which is why the two setup actions below still work.
         shell: msys2 {0}
 
+    env:
+      # Tagged builds use the tag as the application/package version. Other
+      # builds keep the existing git-derived development version.
+      BUILD_VERSION: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+      BRANCH: ${{ github.ref_name }}
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -227,6 +234,15 @@ jobs:
       - name: Package
         run: cpack -G NSIS --config ./build/CPackConfig.cmake
 
+      # The built-in updater consumes a complete install tree rather than the
+      # NSIS executable. This avoids running uninstall hooks during a service
+      # handoff and lets Helios keep the prior directory for rollback.
+      - name: Package the updater archive
+        run: |
+          cmake --install build --prefix "$PWD/build/update-payload"
+          cd build/update-payload
+          cmake -E tar cf ../helios-windows-x86_64.zip --format=zip .
+
       - name: Upload the binary
         if: always()
         uses: actions/upload-artifact@v4
@@ -243,3 +259,86 @@ jobs:
           path: build/cpack_artifacts/*.exe
           if-no-files-found: error
           retention-days: 7
+
+      - name: Upload the updater archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: helios-${{ matrix.os }}-updater
+          path: build/helios-windows-x86_64.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Sign and publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build-windows
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download updater archive
+        uses: actions/download-artifact@v4
+        with:
+          name: helios-windows-2025-updater
+          path: updater
+
+      - name: Download installer
+        uses: actions/download-artifact@v4
+        with:
+          name: helios-windows-2025-installer
+          path: installer
+
+      - name: Build and sign the update manifest
+        env:
+          HELIOS_UPDATE_SIGNING_KEY: ${{ secrets.HELIOS_UPDATE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          version="${tag#v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Release tag must be vMAJOR.MINOR.PATCH with an optional prerelease/build suffix." >&2
+            exit 1
+          fi
+          archive="updater/helios-windows-x86_64.zip"
+          sha256="$(sha256sum "$archive" | cut -d' ' -f1)"
+          size="$(stat -c '%s' "$archive")"
+          prerelease=false
+          if [[ "$version" == *-* ]]; then prerelease=true; fi
+          jq -cn \
+            --arg version "$version" \
+            --arg tag "$tag" \
+            --arg sha256 "$sha256" \
+            --argjson size "$size" \
+            --argjson prerelease "$prerelease" \
+            '{schema:1,version:$version,tag:$tag,prerelease:$prerelease,artifact:{name:"helios-windows-x86_64.zip",size:$size,sha256:$sha256}}' \
+            > helios-update.json
+
+          key_file="$RUNNER_TEMP/helios-update-signing-key.pem"
+          umask 077
+          printf '%s' "$HELIOS_UPDATE_SIGNING_KEY" > "$key_file"
+          trap 'shred -u "$key_file"' EXIT
+          openssl pkey -in "$key_file" -check -noout
+          openssl pkeyutl -sign -rawin -inkey "$key_file" \
+            -in helios-update.json -out helios-update.json.sig
+          test "$(stat -c '%s' helios-update.json.sig)" -eq 64
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          prerelease=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then prerelease=(--prerelease); fi
+          installers=(installer/*.exe)
+          test "${#installers[@]}" -eq 1
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "Helios ${GITHUB_REF_NAME#v}" \
+            --generate-notes \
+            "${prerelease[@]}" \
+            updater/helios-windows-x86_64.zip \
+            helios-update.json \
+            helios-update.json.sig \
+            "${installers[0]}"
