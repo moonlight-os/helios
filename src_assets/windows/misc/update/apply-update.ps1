@@ -27,7 +27,7 @@ function Write-UpdateLog([string]$Message) {
 }
 
 function Set-ServiceBinary([string]$BinaryPath) {
-    $quotedBinaryPath = '`"' + $BinaryPath + '`"'
+    $quotedBinaryPath = '"' + $BinaryPath + '"'
     $result = & sc.exe config $ServiceName 'binPath=' $quotedBinaryPath
     if ($LASTEXITCODE -ne 0) {
         throw "sc.exe could not configure $ServiceName (exit $LASTEXITCODE): $result"
