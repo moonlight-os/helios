@@ -34,7 +34,6 @@ _commit='@COMMIT@'
 source=(
   "helios::git+$url.git#commit=${_commit}"
   'simple-web-server::git+https://github.com/ClassicOldSong/Simple-Web-Server.git'
-  'build-deps::git+https://github.com/LizardByte/build-deps.git'
   'enet::git+https://github.com/cgutman/enet.git'
   'googletest::git+https://github.com/google/googletest.git'
   'inputtino::git+https://github.com/games-on-whales/inputtino.git'
@@ -47,7 +46,11 @@ source=(
   'wlr-protocols::git+https://gitlab.freedesktop.org/wlroots/wlr-protocols.git'
 )
 sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP'
-            'SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
+            'SKIP' 'SKIP' 'SKIP' 'SKIP')
+source_x86_64=('ffmpeg-bundle::https://github.com/LizardByte/build-deps/releases/download/v2026.516.30821/Linux-x86_64-ffmpeg.tar.gz')
+sha256sums_x86_64=('c32319fcc2867befe8ff3ae26b4d3a58378c3a9c1bfef9029c9969321c3bc6ec')
+source_aarch64=('ffmpeg-bundle::https://github.com/LizardByte/build-deps/releases/download/v2026.516.30821/Linux-aarch64-ffmpeg.tar.gz')
+sha256sums_aarch64=('10b6c9440ba6178ec3b944f6c6f697253497cad5196d23a2d32d335daae0062e')
 
 if [[ "${_use_cuda::1}" == 'd' ]] && pacman -Qi cuda &>/dev/null; then
   _use_cuda=true
@@ -57,7 +60,6 @@ prepare() {
   cd helios
   git submodule init
   git config submodule.third-party/Simple-Web-Server.url "$srcdir/simple-web-server"
-  git config submodule.third-party/build-deps.url "$srcdir/build-deps"
   git config submodule.third-party/googletest.url "$srcdir/googletest"
   git config submodule.third-party/inputtino.url "$srcdir/inputtino"
   git config submodule.third-party/libdisplaydevice.url "$srcdir/libdisplaydevice"
@@ -68,7 +70,7 @@ prepare() {
   git config submodule.third-party/wayland-protocols.url "$srcdir/wayland-protocols"
   git config submodule.third-party/wlr-protocols.url "$srcdir/wlr-protocols"
   git -c protocol.file.allow=always submodule update \
-    third-party/Simple-Web-Server third-party/build-deps \
+    third-party/Simple-Web-Server \
     third-party/googletest third-party/inputtino third-party/libdisplaydevice \
     third-party/moonlight-common-c third-party/nanors \
     third-party/nv-codec-headers third-party/tray \
@@ -108,6 +110,7 @@ build() {
     -D CMAKE_INSTALL_PREFIX=/usr
     -D CUDA_FAIL_ON_MISSING=OFF
     -D ENABLE_MLOS_QUIC=ON
+    -D FFMPEG_PREPARED_BINARIES="$srcdir/ffmpeg"
     -D SUNSHINE_ASSETS_DIR=share/helios
     -D SUNSHINE_EXECUTABLE_PATH=/usr/bin/helios
     -D SUNSHINE_PUBLISHER_ISSUE_URL=https://github.com/moonlight-os/helios/issues

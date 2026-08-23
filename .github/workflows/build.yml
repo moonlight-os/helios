@@ -301,7 +301,8 @@ jobs:
           shellcheck packaging/aur/render.sh packaging/nix/update.sh packaging/winget/render.sh
           commit="$(git rev-parse HEAD)"
           git_version="$(git describe --long --tags --abbrev=7 | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g')"
-          chown builder:builder "$RUNNER_TEMP"
+          mkdir -p "$RUNNER_TEMP/aur"
+          chown builder:builder "$RUNNER_TEMP/aur"
           sudo -u builder \
             "$GITHUB_WORKSPACE/packaging/aur/render.sh" \
               v0.0.0 "$commit" \
@@ -371,8 +372,8 @@ jobs:
           if [[ "$tag" != v* ]]; then tag=v0.0.0; fi
           commit="$(git rev-parse HEAD)"
           git_version="$(git describe --long --tags --abbrev=7 | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g')"
-          mkdir -p "$GITHUB_WORKSPACE/arch-artifacts"
-          chown -R builder:builder "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
+          mkdir -p "$GITHUB_WORKSPACE/arch-artifacts" "$RUNNER_TEMP/aur"
+          chown -R builder:builder "$GITHUB_WORKSPACE/arch-artifacts" "$RUNNER_TEMP/aur"
           sudo -u builder \
             "$GITHUB_WORKSPACE/packaging/aur/render.sh" \
               "$tag" "$commit" \
