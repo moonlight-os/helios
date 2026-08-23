@@ -287,7 +287,9 @@ jobs:
     container: archlinux:base-devel
     steps:
       - name: Install validators
-        run: pacman -Syu --noconfirm --needed git ruby shellcheck
+        run: |
+          pacman -Syu --noconfirm --needed git ruby shellcheck sudo
+          useradd --create-home builder
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -299,10 +301,12 @@ jobs:
           shellcheck packaging/aur/render.sh packaging/nix/update.sh packaging/winget/render.sh
           commit="$(git rev-parse HEAD)"
           git_version="$(git describe --long --tags --abbrev=7 | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g')"
-          packaging/aur/render.sh \
-            v0.0.0 "$commit" \
-            0000000000000000000000000000000000000000000000000000000000000000 \
-            "$git_version" "$RUNNER_TEMP/aur"
+          chown builder:builder "$RUNNER_TEMP"
+          sudo -u builder \
+            "$GITHUB_WORKSPACE/packaging/aur/render.sh" \
+              v0.0.0 "$commit" \
+              0000000000000000000000000000000000000000000000000000000000000000 \
+              "$git_version" "$RUNNER_TEMP/aur"
           packaging/winget/render.sh \
             v0.0.0 \
             0000000000000000000000000000000000000000000000000000000000000000 \
