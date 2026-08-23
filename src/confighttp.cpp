@@ -38,6 +38,7 @@
 #include "platform/common.h"
 #include "process.h"
 #include "utility.h"
+#include "updater.h"
 #include "uuid.h"
 
 #ifdef _WIN32
@@ -1317,6 +1318,40 @@ namespace confighttp {
     send_response(response, output_tree);
   }
 
+  void getUpdateStatus(resp_https_t response, req_https_t request) {
+    if (!authenticate(response, request)) {
+      return;
+    }
+    print_req(request);
+    send_response(response, updater::status());
+  }
+
+  void checkForUpdates(resp_https_t response, req_https_t request) {
+    if (!validateContentType(response, request, "application/json") || !authenticate(response, request)) {
+      return;
+    }
+    print_req(request);
+    std::string error;
+    if (!updater::begin_check(config::helios.notify_pre_releases, error)) {
+      bad_request(response, request, error);
+      return;
+    }
+    send_response(response, updater::status());
+  }
+
+  void installUpdate(resp_https_t response, req_https_t request) {
+    if (!validateContentType(response, request, "application/json") || !authenticate(response, request)) {
+      return;
+    }
+    print_req(request);
+    std::string error;
+    if (!updater::begin_install(net::map_port(PORT_HTTPS), error)) {
+      bad_request(response, request, error);
+      return;
+    }
+    send_response(response, updater::status());
+  }
+
   /**
    * @brief Restart Helios.
    * @param response The HTTP response object.
@@ -1543,6 +1578,9 @@ namespace confighttp {
     server.resource["^/api/config$"]["GET"] = getConfig;
     server.resource["^/api/config$"]["POST"] = saveConfig;
     server.resource["^/api/configLocale$"]["GET"] = getLocale;
+    server.resource["^/api/update$"]["GET"] = getUpdateStatus;
+    server.resource["^/api/update/check$"]["POST"] = checkForUpdates;
+    server.resource["^/api/update/install$"]["POST"] = installUpdate;
     server.resource["^/api/restart$"]["POST"] = restart;
     server.resource["^/api/quit$"]["POST"] = quit;
     server.resource["^/api/reset-display-device-persistence$"]["POST"] = resetDisplayDevicePersistence;

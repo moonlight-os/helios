@@ -56,9 +56,19 @@ std::vector < struct coordinates > moveToBeConnected(std::vector < struct coordi
 
 // END ISOLATED DISPLAY DECLARATIONS
 
-LONG getDeviceSettings(const wchar_t* deviceName, DEVMODEW& devMode) {
+bool getDeviceSettings(const wchar_t* deviceName, DEVMODEW& devMode) {
 	devMode.dmSize = sizeof(DEVMODEW);
-	return EnumDisplaySettingsW(deviceName, ENUM_CURRENT_SETTINGS, &devMode);
+	return EnumDisplaySettingsW(deviceName, ENUM_CURRENT_SETTINGS, &devMode) != FALSE;
+}
+
+LONG changeDisplayPosition(const wchar_t* deviceName, int x, int y) {
+	DEVMODEW mode = {};
+	if (!getDeviceSettings(deviceName, mode)) return ERROR_INVALID_PARAMETER;
+	mode.dmPosition.x = x;
+	mode.dmPosition.y = y;
+	mode.dmFields = DM_POSITION;
+	return ChangeDisplaySettingsExW(deviceName, &mode, nullptr,
+		CDS_UPDATEREGISTRY | CDS_NORESET, nullptr);
 }
 
 LONG changeDisplaySettings2(const wchar_t* deviceName, int width, int height, int refresh_rate, bool bApplyIsolated) {
@@ -149,7 +159,9 @@ LONG changeDisplaySettings2(const wchar_t* deviceName, int width, int height, in
 		sDisplayOutput += printAllDisplays(displayArray);
 
 		int iIndex;
-		int xdifference, ydifference = 0;
+		int xdifference = 0;
+		int ydifference = 0;
+		bool primaryDisplayFound = false;
 		for (iIndex = 0; iIndex < displayArray.size(); iIndex += 1)
 		{
 
@@ -159,8 +171,17 @@ LONG changeDisplaySettings2(const wchar_t* deviceName, int width, int height, in
 				{
 					xdifference = (displayArray[iIndex]->position.x) * -1;
 					ydifference = (displayArray[iIndex]->position.y) * -1;
+					primaryDisplayFound = true;
 					break;
 				}
+		}
+
+		if (bVirtualDisplayAlreadyAdded && !primaryDisplayFound) {
+			wprintf(L"[SUDOVDA] Failed to locate the current primary display.\n");
+			for (auto *display : displayArray) {
+				delete display;
+			}
+			return ERROR_INVALID_PARAMETER;
 		}
 
 		// Set all of the OS Displays to their new locations; Do not change the primary
@@ -174,6 +195,7 @@ LONG changeDisplaySettings2(const wchar_t* deviceName, int width, int height, in
 		}
 
 		// Apply the changes only if the virtual display was found
+		LONG isolatedStatus = ERROR_SUCCESS;
 		if( bVirtualDisplayAlreadyAdded == true ) {
 			LONG status = SetDisplayConfig(
 				pathCount,
@@ -186,17 +208,16 @@ LONG changeDisplaySettings2(const wchar_t* deviceName, int width, int height, in
 			);
 			if (status != ERROR_SUCCESS) {
 				wprintf(L"[SUDOVDA] Failed to apply display settings.\n");
+				isolatedStatus = status;
 			} else {
 				wprintf(L"[SUDOVDA] Display settings updated successfully.\n");
 			}
 		}
-		for (iIndex = 0; iIndex < displayArray.size(); iIndex += 1)
-		{
-			if (displayArray[iIndex] != nullptr)
-			{
-				delete displayArray[iIndex];
-			}
-			displayArray.clear();
+		for (auto *display : displayArray) {
+			delete display;
+		}
+		if (isolatedStatus != ERROR_SUCCESS) {
+			return isolatedStatus;
 		}
 	}
 

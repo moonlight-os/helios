@@ -15,6 +15,7 @@
 
 // local includes
 #include "src/config.h"
+#include "src/audio.h"
 #include "src/logging.h"
 #include "src/platform/common.h"
 #include "src/thread_safe.h"
@@ -65,6 +66,19 @@ namespace platf {
       }
 
       return capture_e::ok;
+    }
+  };
+
+  struct virtual_microphone_attr_t: public virtual_microphone_t {
+    util::safe_ptr<pa_simple, pa_simple_free> playback;
+
+    bool write(const float *samples, std::size_t frame_count) override {
+      int status;
+      if (pa_simple_write(playback.get(), samples, frame_count * sizeof(float), &status)) {
+        BOOST_LOG(error) << "pa_simple_write() failed for virtual microphone: "sv << pa_strerror(status);
+        return false;
+      }
+      return true;
     }
   };
 
@@ -191,6 +205,8 @@ namespace platf {
         std::uint32_t stereo = PA_INVALID_INDEX;
         std::uint32_t surround51 = PA_INVALID_INDEX;
         std::uint32_t surround71 = PA_INVALID_INDEX;
+        std::uint32_t microphone_sink = PA_INVALID_INDEX;
+        std::uint32_t microphone_source = PA_INVALID_INDEX;
       } index;
 
       std::unique_ptr<safe::event_t<ctx_event_e>> events;
@@ -269,6 +285,62 @@ namespace platf {
 
         alarm->wait();
         return *alarm->status();
+      }
+
+      int load_module(const char *module, const std::string &args) {
+        auto alarm = safe::make_alarm<int>();
+        op_t op {pa_context_load_module(ctx.get(), module, args.c_str(), cb_i, alarm.get())};
+        if (!op) {
+          return PA_INVALID_INDEX;
+        }
+        alarm->wait();
+        return *alarm->status();
+      }
+
+      std::unique_ptr<virtual_microphone_t> virtual_microphone() {
+        constexpr auto sink_name = "sink-helios-microphone";
+        constexpr auto source_name = "source-helios-microphone";
+        constexpr std::uint8_t mono_map[] {2};
+
+        if (index.microphone_sink == PA_INVALID_INDEX) {
+          index.microphone_sink = load_null(sink_name, mono_map, 1);
+          if (index.microphone_sink == PA_INVALID_INDEX) {
+            BOOST_LOG(error) << "Couldn't create the Helios virtual microphone sink: "sv << pa_strerror(pa_context_errno(ctx.get()));
+            return nullptr;
+          }
+        }
+
+        if (index.microphone_source == PA_INVALID_INDEX) {
+          std::stringstream args;
+          args << "master=" << sink_name << ".monitor source_name=" << source_name
+               << " source_properties=device.description=Helios_Remote_Microphone";
+          index.microphone_source = load_module("module-remap-source", args.str());
+          if (index.microphone_source == PA_INVALID_INDEX) {
+            BOOST_LOG(error) << "Couldn't expose the Helios virtual microphone source: "sv << pa_strerror(pa_context_errno(ctx.get()));
+            return nullptr;
+          }
+        }
+
+        auto microphone = std::make_unique<virtual_microphone_attr_t>();
+        pa_sample_spec spec {PA_SAMPLE_FLOAT32, 48000, 1};
+        pa_buffer_attr attr {
+          .maxlength = uint32_t(-1),
+          .tlength = 960 * sizeof(float) * 4,
+          .prebuf = 960 * sizeof(float),
+          .minreq = 960 * sizeof(float),
+          .fragsize = uint32_t(-1),
+        };
+        int status;
+        microphone->playback.reset(pa_simple_new(nullptr, "helios", PA_STREAM_PLAYBACK,
+                                                  sink_name, "helios-remote-microphone",
+                                                  &spec, nullptr, &attr, &status));
+        if (!microphone->playback) {
+          BOOST_LOG(error) << "Couldn't open the Helios virtual microphone sink: "sv << pa_strerror(status);
+          return nullptr;
+        }
+
+        BOOST_LOG(info) << "Helios virtual microphone is available as ["sv << source_name << ']';
+        return microphone;
       }
 
       int unload_null(std::uint32_t i) {
@@ -495,6 +567,8 @@ namespace platf {
       }
 
       ~server_t() override {
+        unload_null(index.microphone_source);
+        unload_null(index.microphone_sink);
         unload_null(index.stereo);
         unload_null(index.surround51);
         unload_null(index.surround71);
@@ -521,5 +595,34 @@ namespace platf {
     }
 
     return audio;
+  }
+
+  std::unique_ptr<virtual_microphone_t> virtual_microphone() {
+    // Keep the PulseAudio control context (and its loaded modules) alive for
+    // exactly as long as the writer returned to the stream session.
+    struct owned_virtual_microphone_t: virtual_microphone_t {
+      audio::audio_ctx_ref_t audio;
+      std::unique_ptr<virtual_microphone_t> writer;
+      bool write(const float *samples, std::size_t frames) override {
+        return writer->write(samples, frames);
+      }
+    };
+
+    auto audio = ::audio::get_audio_ctx_ref();
+    if (!audio || !audio->control) {
+      return nullptr;
+    }
+    auto *server = dynamic_cast<pa::server_t *>(audio->control.get());
+    if (!server) {
+      return nullptr;
+    }
+    auto writer = server->virtual_microphone();
+    if (!writer) {
+      return nullptr;
+    }
+    auto owned = std::make_unique<owned_virtual_microphone_t>();
+    owned->audio = std::move(audio);
+    owned->writer = std::move(writer);
+    return owned;
   }
 }  // namespace platf

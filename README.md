@@ -1,209 +1,94 @@
 # Helios
 
-Helios is a self-hosted desktop stream host for [Artemis(Moonlight Noir)](https://github.com/ClassicOldSong/moonlight-android). Offering low latency, native client resolution, cloud gaming server capabilities with support for AMD, Intel, and Nvidia GPUs for hardware encoding. Software encoding is also available. A web UI is provided to allow configuration and client pairing from your favorite web browser. Pair from the local server or any mobile device.
+Helios is the Moonlight OS streaming host. It pairs with Selene and other
+Moonlight-compatible clients, exposes a local browser-based configuration
+interface, and supports hardware encoding on AMD, Intel, and Nvidia GPUs.
 
-Major features:
+## Moonlight OS features
 
-- [x] Built-in Virtual Display with HDR support that matches the resolution/framerate config of your client automatically
-- [x] Permission management for clients
-- [x] Clipboard sync
-- [x] Commands for client connection/disconnection (checkout [Auto pause/resume games](https://github.com/ClassicOldSong/Apollo/wiki/Auto-pause-resume-games))
-- [x] Input only mode
+- Stable per-client virtual displays and multi-display layouts
+- Per-client launch, input, clipboard, and file permissions
+- Authenticated QUIC transport negotiated per streaming session
+- Session-scoped USB forwarding
+- Read-only system-disk access for recovery workflows
+- Microphone and camera uplinks
+- Input-only sessions
 
-## Usage
+All Moonlight OS extensions are negotiated. Clients that do not advertise an
+extension continue through the compatible Moonlight protocol path.
 
-Refer to LizardByte's documentation hosted on [Read the Docs](https://docs.lizardbyte.dev/projects/sunshine) for now.
+## Getting started
 
-Currently Virtual Display support is Windows only, Linux support is planned and will be implemented in the future.
+See the [getting-started guide](docs/getting_started.md) for platform setup,
+pairing, network ports, and troubleshooting. The extension designs live in:
 
-## About Permission System
+- [Camera uplink](docs/moonlight-os-camera-uplink.md)
+- [Display topology](docs/moonlight-os-display-topology.md)
 
-Check out the [Wiki](https://github.com/ClassicOldSong/Apollo/wiki/Permission-System)
+Runtime settings are available from Helios's local web interface. The first
+paired client receives administrative permissions; later clients begin with
+view and app-list access until an administrator grants more.
 
-> [!NOTE]
-> The **FIRST** client paired with Helios will be granted with FULL permissions, then other newly paired clients will only be granted with `View Streams` and `List Apps` permission. If you encounter `Permission Denied` error when trying to launch any app, go check the permission for that device and grant `Launch Apps` permission. The same applies to the situation when you find that you can't move mouse or type with keyboard on newly paired clients, grant the corresponding client `Mouse Input` and `Keyboard Input` permissions.
+Windows service installations can apply cryptographically signed releases from
+the Home page. See [Updating Helios](docs/updating.md) for signature validation,
+staging, health checks, and rollback behaviour.
 
-## About Virtual Display
+## Virtual displays
 
-> [!WARNING]
-> ***It is highly recommend to remove any other virtual display solutions from your system and Helios/Helios config, to reduce confusions and compatibility issues.***
+Helios gives each paired client a stable display identity so its layout can be
+restored on the next session. Windows uses SudoVDA. Linux uses the available
+compositor or display-topology provider. If duplicate displays appear, remove
+conflicting virtual-display drivers before troubleshooting Helios itself.
 
-> [!NOTE]
-> **TL;DR** Just treat your Artemis/Moonlight client like a dedicated PnP monitor with Helios.
+On dual-GPU systems, select the GPU that should encode the stream in the web
+interface. Headless mode can render directly on a supported GPU without a
+physical dummy plug.
 
-Helios uses SudoVDA for virtual display. It features auto resolution and framerate matching for your Artemis/Moonlight clients. The virtual display is created upon the stream starts and removed once the app quits. **If you do not see a new virtual display added or removed when the stream starts or stops, there may be a driver misconfiguration, or another persistent virtual display might still be active.**
+## HDR
 
-The virtual display works just like any physically attached monitors with SudoVDA, there's completely no need for a super complicated solution to "fix" resolution configurations for your devices. Unlike all other solutions that reuses one identity or generate a random one each time for any virtual display sessions, **Helios assigns a fixed identity for each Artemis/Moonlight client, so your display configuration will be automatically remembered and managed by Windows natively.**
+HDR availability depends on the host operating system, capture path, encoder,
+client decoder, and display. Start with SDR when diagnosing colour or
+brightness problems. On Windows, the virtual display and selected client must
+both advertise compatible HDR support.
 
-## Configuration for dual GPU laptops
+## Requirements
 
-Helios supports dual GPUs seamlessly.
+Actual limits depend heavily on resolution, frame rate, codec, and encoder.
+Treat these as practical starting points rather than purchase guarantees:
 
-If you want to use your dGPU, just set the `Adapter Name` to your dGPU and enable `Headless mode` in `Audio/Video` tab, save and restart your computer. No dummy plug is needed any more, the image will be rendered and encoded directly from your dGPU.
+- Windows 10 or later, macOS 12 or later, or a current Linux distribution
+- A supported hardware encoder (NVENC, VA-API/QSV, or AMF)
+- 4 GB RAM
+- Wired Ethernet for high-resolution or multi-display streaming; otherwise a
+  strong 5 GHz or newer Wi-Fi connection
 
-## About HDR
+## Building and testing
 
-HDR starts supporting from Windows 11 23H2 and generally supported on 24H2. Some systems might not have HDR toggle on 23H2 and you just need to upgrade to 24H2. Any system lower than 23H2/Windows 10 will not have HDR option available.
+Helios uses CMake and includes recursive submodules.
 
-> [!NOTE]
-> The below section is written for professional media workers. It doesn't stop you from enabling HDR if you know what you're doing and have deep understanding about how HDR works.
->
-> Helios and SudoVDA can handle HDR just fine like any other streaming solutions.
->
-> If you have had good experience with HDR previously, you can safely ignore this section.
->
-> If you're curious, read on, but don't blame Helios for poor HDR support.
-
-Whether HDR streaming looks good, it depends completely on your client.
-
-In short, ICC color correction should be totally useless while streaming HDR. It's your client's job to get HDR content displayed right, not the host. But in fact, it does affect the captured video stream and reflect changes on devices that can handle HDR correctly. On other devices that can't, the info is not respected at all.
-
-It's very complicated to explain why HDR is a total mess, and why enabling HDR makes the image appear dark/yellow. If it's your first time got HDR streaming working, and thinks HDR looks awful, you're right, but that's not Helios's fault, it's your device that tone mapped SDR content to the maximum of the capability of its screen, there's no headroom for anything beyond that actual peak brightness for HDR. For details, please take a look [here](https://github.com/ClassicOldSong/Apollo/issues/164).
-
-For client devices, usually Apple products that have HDR capability can be trusted to have good results, other than that, your luck depends.
-
-<details>
-<summary>DEPRECATION ALERT</summary>
-
-Enabling HDR is **generally not recommended** with **ANY streaming solutions** at this moment, probably in the long term. The issue with **HDR itself** is huge, with loads of semi-incompatible standards, and massive variance between device configurations and capabilities. Game support for HDR is still choppy.
-
-SDR actually provides much more stable color accuracy, and are widely supported throughout most devices you can imagine. For games, art style can easily overcome the shortcoming with no HDR, and SDR has pretty standard workflows to ensure their visual performance. So HDR isn't *that* important in most of the cases.
-
-</details>
-
-## How to run multiple instances of Helios for multiple virtual displays
-
-Follow the instructions in the [Wiki](https://github.com/ClassicOldSong/Apollo/wiki/How-to-start-multiple-instances-of-Helios).
-
-## FAQ
-Moved to [WiKi](https://github.com/ClassicOldSong/Apollo/wiki/FAQ)
-
-## Stuttering Clinic
-Here're some common causes and solutions for stutters: [WiKi](https://github.com/ClassicOldSong/Apollo/wiki/Stuttering-Clinic).
-
-## Device specific setups
-- Pixel devices might not be able to use native resolution:
-  - Change the device resolution to Max: https://github.com/ClassicOldSong/Apollo/issues/700
-
-## System Requirements
-
-> **Warning**: This table is a work in progress. Do not purchase hardware based on this.
-
-**Minimum Requirements**
-
-| **Component** | **Description** |
-|---------------|-----------------|
-| GPU           | AMD: VCE 1.0 or higher, see: [obs-amd hardware support](https://github.com/obsproject/obs-amd-encoder/wiki/Hardware-Support) |
-|               | Intel: VAAPI-compatible, see: [VAAPI hardware support](https://www.intel.com/content/www/us/en/developer/articles/technical/linuxmedia-vaapi.html) |
-|               | Nvidia: NVENC enabled cards, see: [nvenc support matrix](https://developer.nvidia.com/video-encode-and-decode-gpu-support-matrix-new) |
-| CPU           | AMD: Ryzen 3 or higher |
-|               | Intel: Core i3 or higher |
-| RAM           | 4GB or more |
-| OS            | Windows: 10+ (Windows Server requires [manual installation](https://github.com/nefarius/ViGEmBus/issues/153) for gamepad support) |
-|               | macOS: 12+ |
-|               | Linux/Debian: 11 (bullseye) |
-|               | Linux/Fedora: 39+ |
-|               | Linux/Ubuntu: 22.04+ (jammy) |
-| Network       | Host: 5GHz, 802.11ac |
-|               | Client: 5GHz, 802.11ac |
-
-**4k Suggestions**
-
-| **Component** | **Description** |
-|---------------|-----------------|
-| GPU           | AMD: Video Coding Engine 3.1 or higher |
-|               | Intel: HD Graphics 510 or higher |
-|               | Nvidia: GeForce GTX 1080 or higher |
-| CPU           | AMD: Ryzen 5 or higher |
-|               | Intel: Core i5 or higher |
-| Network       | Host: CAT5e ethernet or better |
-|               | Client: CAT5e ethernet or better |
-
-**HDR Suggestions**
-
-| **Component** | **Description** |
-|---------------|-----------------|
-| GPU           | AMD: Video Coding Engine 3.4 or higher |
-|               | Intel: UHD Graphics 730 or higher |
-|               | Nvidia: Pascal-based GPU (GTX 10-series) or higher |
-| CPU           | AMD: todo |
-|               | Intel: todo |
-| Network       | Host: CAT5e ethernet or better |
-|               | Client: CAT5e ethernet or better |
-
-## Integrations
-
-SudoVDA: Virtual Display Adapter Driver used in Helios
-
-[Artemis](https://github.com/ClassicOldSong/moonlight-android): Integrated Virtual Display options control from client side
-
-**NOTE**: Artemis currently supports Android only. Other platforms will come later.
-
-## Support
-
-Currently support is only provided via GitHub Issues/Discussions.
-
-No real time chat support will ever be provided for Helios and Artemis. Including but not limited to:
-
-- Discord
-- Telegram
-- Whatsapp
-- QQ
-- WeChat 
-
-> When there's a chat, there're dramas. -- Confucius
-
-## Downloads
-
-### Direct Download
-
-**Recommended**
-
-[Releases](https://github.com/ClassicOldSong/Apollo/releases)
-
-### WinGet
-
-**Note:** Community maintained
-
-In an elevated PowerShell window, run
-
-```pwsh
-winget install ClassicOldSong.Helios
-
+```sh
+git submodule update --init --recursive
+cmake -S . -B build -DBUILD_TESTS=ON
+cmake --build build
+ctest --test-dir build --output-on-failure
 ```
 
-You'll need WinGet installed first.
+Linux builds require the development packages detected by CMake. Platform
+packaging definitions are under `packaging/` and `cmake/packaging/`.
 
-### Chocolatey
+## Support and releases
 
-**Note:** Community maintained
+Report reproducible bugs and request features in the
+[Helios issue tracker](https://github.com/moonlight-os/helios/issues).
+Published builds are available from
+[Helios releases](https://github.com/moonlight-os/helios/releases).
 
-You can also install the helios streaming server with chocolatey.
-
-Install Chocolatey if you don't have it, then run the following command in an elevated PowerShell/CMD window:
-
-```pwsh
-choco upgrade helios -y 
-```
-
-Same command can be used to upgrade, add to a scheduled task to automate updates.
-
-See more details on the chocolatey package [here](https://community.chocolatey.org/packages/apollo)
-
-## Disclaimer
-
-I got kicked from Moonlight and Helios's Discord server and banned from Helios's GitHub repo literally for helping people out.
-
-This is what I got for finding a bug, opened an issue, getting no response, troubleshoot myself, fixed the issue myself, shared it by PR to the main repo hoping my efforts can help someone else during the maintenance gap.
-
-Yes, I'm going away. [Helios](https://github.com/ClassicOldSong/Apollo) and [Artemis(Moonlight Noir)](https://github.com/ClassicOldSong/moonlight-android) will no longer be compatible with OG Helios and OG Moonlight eventually, but they'll work even better with much more carefully designed features.
-
-The Moonlight repo had stayed silent for 5 months, with nobody actually responding to issues, and people are getting totally no help besides the limited FAQ in their Discord server. I tried to answer issues and questions, solve problems within my ability but I got kicked out just for helping others.
-
-**PRs for feature improvements are welcomed here unlike the main repo, your ideas are more likely to be appreciated and your efforts are actually being respected. We welcome people who can and willing to share their efforts, helping yourselves and other people in need.**
-
-**Update**: They have contacted me and apologized for this incident, but the fact it **happened** still motivated me to start my own fork.
+When reporting a streaming problem, include the Helios version, host OS,
+encoder, client version, transport, and the smallest reproducible display
+layout. Do not post pairing secrets, private keys, Wi-Fi credentials, or full
+diagnostic archives publicly.
 
 ## License
 
-GPLv3
+Helios is distributed under the GNU General Public License v3.0. See
+[LICENSE](LICENSE) for the complete terms.

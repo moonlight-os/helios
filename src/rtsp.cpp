@@ -12,7 +12,10 @@ extern "C" {
 // standard includes
 #include <array>
 #include <cctype>
+#include <chrono>
 #include <format>
+#include <mutex>
+#include <optional>
 #include <set>
 #include <unordered_map>
 #include <utility>
@@ -27,6 +30,7 @@ extern "C" {
 #include "input.h"
 #include "logging.h"
 #include "network.h"
+#include "platform/common.h"
 #include "rtsp.h"
 #include "stream.h"
 #include "sync.h"
@@ -430,6 +434,8 @@ namespace rtsp_stream {
         handle_accept(ec);
       });
 
+      arm_pending_cleanup();
+
       return 0;
     }
 
@@ -456,8 +462,19 @@ namespace rtsp_stream {
 
       auto socket = std::move(next_socket);
 
-      auto launch_session {launch_event.view(0s)};
+      std::optional<uint32_t> launch_session_id;
+      boost::system::error_code endpoint_ec;
+      const auto endpoint = socket->sock.remote_endpoint(endpoint_ec);
+      if (!endpoint_ec && net::normalize_address(endpoint.address()).is_loopback()) {
+        launch_session_id = take_quic_proxy(endpoint.port());
+      }
+
+      auto launch_session = claim_pending_session(launch_session_id);
       if (launch_session) {
+        if (launch_session_id) {
+          BOOST_LOG(debug) << "Moonlight OS QUIC: accepted local RTSP proxy for launch ["sv
+                          << *launch_session_id << ']';
+        }
         // Associate the current RTSP session with this socket and start reading
         socket->session = launch_session;
         socket->read();
@@ -490,23 +507,12 @@ namespace rtsp_stream {
      * @param launch_session Streaming session information.
      */
     void session_raise(std::shared_ptr<launch_session_t> launch_session) {
-      // If a launch event is still pending, don't overwrite it.
-      if (launch_event.view(0s)) {
-        return;
-      }
-
-      // Raise the new launch session to prepare for the RTSP handshake
-      launch_event.raise(std::move(launch_session));
-
-      // Arm the timer to expire this launch session if the client times out
-      raised_timer.expires_after(config::stream.ping_timeout);
-      raised_timer.async_wait([this](const boost::system::error_code &ec) {
-        if (!ec) {
-          auto discarded = launch_event.pop(0s);
-          if (discarded) {
-            BOOST_LOG(debug) << "Event timeout: "sv << discarded->unique_id;
-          }
-        }
+      const auto now = std::chrono::steady_clock::now();
+      std::lock_guard lock(_pending_mutex);
+      prune_pending_locked(now);
+      const auto id = launch_session->id;
+      _pending_sessions.insert_or_assign(id, pending_session_t {
+        std::move(launch_session), now + config::stream.ping_timeout, _next_pending_order++
       });
     }
 
@@ -515,17 +521,34 @@ namespace rtsp_stream {
      * @param launch_session_id The ID of the session to clear.
      */
     void session_clear(uint32_t launch_session_id) {
-      // We currently only support a single pending RTSP session,
-      // so the ID should always match the one for that session.
-      auto launch_session = launch_event.view(0s);
-      if (launch_session) {
-        if (launch_session->id != launch_session_id) {
-          BOOST_LOG(error) << "Attempted to clear unexpected session: "sv << launch_session_id << " vs "sv << launch_session->id;
+      std::lock_guard lock(_pending_mutex);
+      _pending_sessions.erase(launch_session_id);
+      for (auto it = _quic_proxies.begin(); it != _quic_proxies.end();) {
+        if (it->second.launch_session_id == launch_session_id) {
+          it = _quic_proxies.erase(it);
         } else {
-          raised_timer.cancel();
-          launch_event.pop();
+          ++it;
         }
       }
+    }
+
+    bool register_quic_proxy(uint16_t local_port, uint32_t launch_session_id) {
+      const auto now = std::chrono::steady_clock::now();
+      std::lock_guard lock(_pending_mutex);
+      prune_pending_locked(now);
+      const auto session = _pending_sessions.find(launch_session_id);
+      if (session == _pending_sessions.end() || !session->second.session->quic_ticket) {
+        return false;
+      }
+      _quic_proxies.insert_or_assign(local_port, quic_proxy_t {
+        launch_session_id, now + config::stream.ping_timeout
+      });
+      return true;
+    }
+
+    void unregister_quic_proxy(uint16_t local_port) {
+      std::lock_guard lock(_pending_mutex);
+      _quic_proxies.erase(local_port);
     }
 
     /**
@@ -536,8 +559,6 @@ namespace rtsp_stream {
       auto lg = _session_slots.lock();
       return _session_slots->size();
     }
-
-    safe::event_t<std::shared_ptr<launch_session_t>> launch_event;
 
     /**
      * @brief Clear launch sessions.
@@ -554,6 +575,7 @@ namespace rtsp_stream {
         if (all || stream::session::state(slot) == stream::session::state_e::STOPPING) {
           stream::session::stop(slot);
           stream::session::join(slot);
+          stream::session::detach_slow_cleanup(*i);
 
           i = _session_slots->erase(i);
         } else {
@@ -569,6 +591,18 @@ namespace rtsp_stream {
     void remove(const std::shared_ptr<stream::session_t> &session) {
       auto lg = _session_slots.lock();
       _session_slots->erase(session);
+    }
+
+    void stop_by_launch_id(uint32_t launch_session_id) {
+      auto lg = _session_slots.lock();
+      for (const auto& session : *_session_slots) {
+        if (session && stream::session::launch_id(*session) == launch_session_id) {
+          BOOST_LOG(info) << "Authenticated QUIC connection closed; stopping launch session ["sv
+                          << launch_session_id << ']';
+          stream::session::stop(*session);
+          return;
+        }
+      }
     }
 
     /**
@@ -599,6 +633,12 @@ namespace rtsp_stream {
      */
     void stop() {
       acceptor.close();
+      pending_cleanup_timer.cancel();
+      {
+        std::lock_guard lock(_pending_mutex);
+        _pending_sessions.clear();
+        _quic_proxies.clear();
+      }
       io_context.stop();
       clear();
     }
@@ -629,13 +669,114 @@ namespace rtsp_stream {
     }
 
   private:
+    using pending_clock_t = std::chrono::steady_clock;
+
+    struct pending_session_t {
+      std::shared_ptr<launch_session_t> session;
+      pending_clock_t::time_point expires;
+      uint64_t order;
+    };
+
+    struct quic_proxy_t {
+      uint32_t launch_session_id;
+      pending_clock_t::time_point expires;
+    };
+
+    void prune_pending_locked(pending_clock_t::time_point now) {
+      for (auto it = _pending_sessions.begin(); it != _pending_sessions.end();) {
+        if (it->second.expires <= now) {
+          BOOST_LOG(debug) << "Event timeout: "sv << it->second.session->unique_id;
+          it = _pending_sessions.erase(it);
+        } else {
+          ++it;
+        }
+      }
+      for (auto it = _quic_proxies.begin(); it != _quic_proxies.end();) {
+        if (it->second.expires <= now || !_pending_sessions.contains(it->second.launch_session_id)) {
+          it = _quic_proxies.erase(it);
+        } else {
+          ++it;
+        }
+      }
+    }
+
+    std::optional<uint32_t> take_quic_proxy(uint16_t local_port) {
+      const auto now = pending_clock_t::now();
+      std::lock_guard lock(_pending_mutex);
+      prune_pending_locked(now);
+      const auto proxy = _quic_proxies.find(local_port);
+      if (proxy == _quic_proxies.end()) {
+        return std::nullopt;
+      }
+      const auto launch_session_id = proxy->second.launch_session_id;
+      _quic_proxies.erase(proxy);
+      return launch_session_id;
+    }
+
+    std::shared_ptr<launch_session_t> claim_pending_session(
+      std::optional<uint32_t> launch_session_id) {
+      const auto now = pending_clock_t::now();
+      std::lock_guard lock(_pending_mutex);
+      prune_pending_locked(now);
+
+      auto selected = _pending_sessions.end();
+      if (launch_session_id) {
+        selected = _pending_sessions.find(*launch_session_id);
+      } else {
+        for (auto it = _pending_sessions.begin(); it != _pending_sessions.end(); ++it) {
+          // QUIC sessions must be claimed by the authenticated proxy binding.
+          if (it->second.session->quic_ticket) {
+            continue;
+          }
+          if (selected == _pending_sessions.end() || it->second.order < selected->second.order) {
+            selected = it;
+          }
+        }
+      }
+      if (selected == _pending_sessions.end()) {
+        return nullptr;
+      }
+      if (launch_session_id) {
+        // QUIC authenticates every short-lived RTSP proxy against one launch
+        // ticket. Keep that launch state until the handshake finishes so the
+        // subsequent SETUP, ANNOUNCE, and PLAY streams can claim the same
+        // session, matching the legacy launch-event behaviour.
+        selected->second.expires = now + config::stream.ping_timeout;
+        return selected->second.session;
+      }
+      auto session = std::move(selected->second.session);
+      _pending_sessions.erase(selected);
+      return session;
+    }
+
+    void arm_pending_cleanup() {
+      pending_cleanup_timer.expires_after(1s);
+      pending_cleanup_timer.async_wait([this](const boost::system::error_code &ec) {
+        if (ec) {
+          return;
+        }
+        {
+          std::lock_guard lock(_pending_mutex);
+          prune_pending_locked(pending_clock_t::now());
+        }
+        if (acceptor.is_open()) {
+          arm_pending_cleanup();
+        }
+      });
+    }
+
     std::unordered_map<std::string_view, cmd_func_t> _map_cmd_cb;
 
     sync_util::sync_t<std::set<std::shared_ptr<stream::session_t>>> _session_slots;
 
     boost::asio::io_context io_context;
     tcp::acceptor acceptor {io_context};
-    boost::asio::steady_timer raised_timer {io_context};
+    boost::asio::steady_timer pending_cleanup_timer {io_context};
+
+    std::mutex _pending_mutex;
+    std::unordered_map<uint32_t, pending_session_t> _pending_sessions;
+    std::unordered_map<uint16_t, quic_proxy_t> _quic_proxies;
+    uint64_t _next_pending_order = 0;
 
     std::shared_ptr<socket_t> next_socket;
   };
@@ -648,6 +789,18 @@ namespace rtsp_stream {
 
   void launch_session_clear(uint32_t launch_session_id) {
     server.session_clear(launch_session_id);
+  }
+
+  bool register_quic_rtsp_proxy(uint16_t local_port, uint32_t launch_session_id) {
+    return server.register_quic_proxy(local_port, launch_session_id);
+  }
+
+  void unregister_quic_rtsp_proxy(uint16_t local_port) {
+    server.unregister_quic_proxy(local_port);
+  }
+
+  void stop_session_by_launch_id(uint32_t launch_session_id) {
+    server.stop_by_launch_id(launch_session_id);
   }
 
   int session_count() {
@@ -884,6 +1037,10 @@ namespace rtsp_stream {
       port = net::map_port(stream::VIDEO_STREAM_PORT);
     } else if (type == "control"sv) {
       port = net::map_port(stream::CONTROL_PORT);
+    } else if (type == "microphone"sv) {
+      port = net::map_port(stream::MICROPHONE_STREAM_PORT);
+    } else if (type == "camera"sv) {
+      port = net::map_port(stream::CAMERA_STREAM_PORT);
     } else {
       cmd_not_found(sock, session, std::move(req));
 
@@ -979,6 +1136,7 @@ namespace rtsp_stream {
     args.try_emplace("x-nv-vqos[0].fec.minRequiredFecPackets"sv, "0"sv);
     args.try_emplace("x-nv-general.featureFlags"sv, "135"sv);
     args.try_emplace("x-ml-general.featureFlags"sv, "0"sv);
+    args.try_emplace("x-ml-video.displayIndex"sv, "0"sv);
     args.try_emplace("x-nv-vqos[0].qosTrafficType"sv, "5"sv);
     args.try_emplace("x-nv-aqos.qosTrafficType"sv, "4"sv);
     args.try_emplace("x-ml-video.configuredBitrateKbps"sv, "0"sv);
@@ -1002,6 +1160,19 @@ namespace rtsp_stream {
       config.packetsize = util::from_view(args.at("x-nv-video[0].packetSize"sv));
       config.minRequiredFecPackets = util::from_view(args.at("x-nv-vqos[0].fec.minRequiredFecPackets"sv));
       config.mlFeatureFlags = util::from_view(args.at("x-ml-general.featureFlags"sv));
+      auto display_index = util::from_view(args.at("x-ml-video.displayIndex"sv));
+      if (display_index < 0 || display_index >= 16) {
+        throw std::out_of_range("display index");
+      }
+      config.display_index = (std::uint16_t) display_index;
+      auto client_requested_indexed_topology =
+        (config.mlFeatureFlags & ML_FF_DISPLAY_TOPOLOGY_V1) != 0;
+      auto topology_available = platf::virtual_display_topology_available();
+      config.indexed_display_topology =
+        client_requested_indexed_topology && topology_available;
+      if (client_requested_indexed_topology && !topology_available) {
+        BOOST_LOG(info) << "Virtual display topology is unavailable; using the configured physical output"sv;
+      }
       config.audioQosType = util::from_view(args.at("x-nv-aqos.qosTrafficType"sv));
       config.videoQosType = util::from_view(args.at("x-nv-vqos[0].qosTrafficType"sv));
       config.encryptionFlagsEnabled = util::from_view(args.at("x-ss-general.encryptionEnabled"sv));

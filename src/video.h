@@ -48,6 +48,12 @@ namespace video {
 
     int encodingFramerate; // Requested display framerate
     bool input_only;
+
+    // Non-empty only for a Moonlight OS topology stream. Vanilla sessions
+    // continue to use the process-selected display and shared capture path.
+    // Explicit outputs are captured by a dedicated capture owner so two
+    // indexed streams can never silently encode the same monitor.
+    std::string output_name;
   };
 
   platf::mem_type_e map_base_dev_type(AVHWDeviceType type);

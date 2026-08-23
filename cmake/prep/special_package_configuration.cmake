@@ -10,7 +10,7 @@ if(APPLE)
     endif()
 elseif(UNIX)
     # configure the .desktop file
-    set(SUNSHINE_DESKTOP_ICON "helios.svg")
+    set(SUNSHINE_DESKTOP_ICON "helios")
     if(${SUNSHINE_BUILD_APPIMAGE})
         configure_file(packaging/linux/AppImage/${PROJECT_FQDN}.desktop ${PROJECT_FQDN}.desktop @ONLY)
     elseif(${SUNSHINE_BUILD_FLATPAK})
@@ -26,6 +26,7 @@ elseif(UNIX)
 
     # configure service
     configure_file(packaging/linux/helios.service.in helios.service @ONLY)
+    configure_file(packaging/linux/helios-usb-helper.service.in helios-usb-helper.service @ONLY)
 
     # configure the arch linux pkgbuild
     if(${SUNSHINE_CONFIGURE_PKGBUILD})

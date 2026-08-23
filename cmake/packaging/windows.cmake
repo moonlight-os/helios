@@ -1,6 +1,13 @@
 # windows specific packaging
 install(TARGETS helios RUNTIME DESTINATION "." COMPONENT application)
 
+if(MLOS_QUIC_ENABLED AND MSQUIC_RUNTIME_LIBRARY)
+    install(FILES "${MSQUIC_RUNTIME_LIBRARY}"
+            DESTINATION "."
+            COMPONENT application
+            RENAME "msquic.dll")
+endif()
+
 # Hardening: include zlib1.dll (loaded via LoadLibrary() in openssl's libcrypto.a)
 install(FILES "${ZLIB}" DESTINATION "." COMPONENT application)
 
@@ -17,6 +24,21 @@ install(FILES ${VIGEMBUS_INSTALLER}
         DESTINATION "scripts"
         RENAME "vigembus_installer.exe"
         COMPONENT gamepad)
+
+# USB/IP client used by Moonlight OS passthrough. Upstream explicitly warns
+# that 0.9.7.8 can cause memory corruption/BSOD, so pin the preceding signed
+# release and verify it before including it in the Helios installer.
+set(USBIP_WIN2_INSTALLER "${CMAKE_BINARY_DIR}/USBip-0.9.7.7-x64.exe")
+file(DOWNLOAD
+        "https://github.com/vadimgrn/usbip-win2/releases/download/v.0.9.7.7/USBip-0.9.7.7-x64.exe"
+        ${USBIP_WIN2_INSTALLER}
+        SHOW_PROGRESS
+        EXPECTED_HASH SHA256=51620fa5f9f8be5932bc9d786deee557ce06d5407a99cab490dcfac71f185fea
+        TIMEOUT 120
+)
+install(FILES ${USBIP_WIN2_INSTALLER}
+        DESTINATION "scripts/usb"
+        COMPONENT application)
 
 # Adding tools
 install(TARGETS dxgi-info RUNTIME DESTINATION "tools" COMPONENT dxgi)
@@ -40,6 +62,24 @@ install(DIRECTORY "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/misc/migration/"
 install(DIRECTORY "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/misc/path/"
         DESTINATION "scripts"
         COMPONENT assets)
+install(DIRECTORY "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/misc/usb/"
+        DESTINATION "scripts/usb"
+        COMPONENT assets)
+install(DIRECTORY "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/misc/update/"
+        DESTINATION "scripts/update"
+        COMPONENT assets)
+install(DIRECTORY "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/misc/camera/"
+        DESTINATION "scripts/camera"
+        COMPONENT assets
+        PATTERN "bin" EXCLUDE
+        PATTERN "build-camera-source.ps1" EXCLUDE
+        PATTERN "moonlight-os-camera.patch" EXCLUDE)
+install(FILES
+        "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/misc/camera/bin/MoonlightOSCameraSource.dll"
+        "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/misc/camera/bin/MoonlightOSCameraInstaller.exe"
+        DESTINATION "camera"
+        COMPONENT application
+        OPTIONAL)
 
 # Configurable options for the service
 install(DIRECTORY "${SUNSHINE_SOURCE_ASSETS_DIR}/windows/misc/autostart/"

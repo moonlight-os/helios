@@ -6,11 +6,13 @@
 
 // standard includes
 #include <atomic>
-#include <memory>
 #include <list>
+#include <memory>
+#include <optional>
 
 // local includes
 #include "crypto.h"
+#include "quic_transport.h"
 #include "thread_safe.h"
 
 #ifdef _WIN32
@@ -55,6 +57,10 @@ namespace rtsp_stream {
     std::string rtsp_url_scheme;
     uint32_t rtsp_iv_counter;
 
+    // Present only when the client opted into M7 and the QUIC listener is
+    // actually ready. The ticket binds that connection to this HTTPS launch.
+    std::optional<quic_transport::ticket_t> quic_ticket;
+
     std::list<crypto::command_entry_t> client_do_cmds;
     std::list<crypto::command_entry_t> client_undo_cmds;
 
@@ -70,6 +76,25 @@ namespace rtsp_stream {
    * @param launch_session_id The ID of the session to clear.
    */
   void launch_session_clear(uint32_t launch_session_id);
+
+  /**
+   * @brief Bind a localhost QUIC RTSP proxy socket to its HTTPS launch.
+   * @param local_port Source port of the already-bound localhost TCP socket.
+   * @param launch_session_id Launch ID carried by the authenticated QUIC ticket.
+   * @return true when the launch exists and the binding was registered.
+   */
+  bool register_quic_rtsp_proxy(uint16_t local_port, uint32_t launch_session_id);
+
+  /**
+   * @brief Remove an unused localhost QUIC RTSP proxy binding.
+   */
+  void unregister_quic_rtsp_proxy(uint16_t local_port);
+
+  /**
+   * @brief Stops the stream owned by a closed authenticated QUIC connection.
+   * @param launch_session_id The launch ID carried by the consumed QUIC ticket.
+   */
+  void stop_session_by_launch_id(uint32_t launch_session_id);
 
   /**
    * @brief Get the number of active sessions.

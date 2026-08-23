@@ -4,7 +4,7 @@
 <script type="module" src="https://md-block.verou.me/md-block.js"></script>
 <md-block
   hmin="2"
-  src="https://raw.githubusercontent.com/LizardByte/Helios/changelog/CHANGELOG.md">
+  src="https://raw.githubusercontent.com/moonlight-os/helios/main/CHANGELOG.md">
 </md-block>
 @endhtmlonly
 

@@ -3,11 +3,8 @@ Nvidia announced that their GameStream service for Nvidia Games clients will be 
 Luckily, Helios performance is now equal to or better than Nvidia GameStream.
 
 ## Migration
-We have developed a simple migration tool to help you migrate your GameStream games and apps to Helios automatically.
-Please check out our [GSMS](https://github.com/LizardByte/GSMS) project if you're interested in an automated
-migration option. GSMS offers the ability to migrate your custom and auto-detected games and apps. The
-working directory, command, and image are all set in Helios's `apps.json` file. The box-art image is also copied
-to a specified directory.
+There is no supported automatic migration tool for the Moonlight OS fork. Recreate the applications you want to
+publish in Helios; their working directory, command, and artwork are stored in `apps.json`.
 
 ## Internet Streaming
 If you are using the Moonlight Internet Hosting Tool, you can remove it from your system when you migrate to Helios.

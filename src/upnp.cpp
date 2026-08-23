@@ -17,6 +17,7 @@
 #include "logging.h"
 #include "network.h"
 #include "nvhttp.h"
+#include "quic_transport.h"
 #include "rtsp.h"
 #include "stream.h"
 #include "upnp.h"
@@ -69,7 +70,12 @@ namespace upnp {
       auto rtsp = std::to_string(net::map_port(rtsp_stream::RTSP_SETUP_PORT));
       auto video = std::to_string(net::map_port(stream::VIDEO_STREAM_PORT));
       auto audio = std::to_string(net::map_port(stream::AUDIO_STREAM_PORT));
+      auto microphone = std::to_string(net::map_port(stream::MICROPHONE_STREAM_PORT));
+      auto camera = std::to_string(net::map_port(stream::CAMERA_STREAM_PORT));
       auto control = std::to_string(net::map_port(stream::CONTROL_PORT));
+#ifdef HAVE_MSQUIC
+      auto quic = std::to_string(net::map_port(quic_transport::PORT));
+#endif
       auto gs_http = std::to_string(net::map_port(nvhttp::PORT_HTTP));
       auto gs_https = std::to_string(net::map_port(nvhttp::PORT_HTTPS));
       auto wm_http = std::to_string(net::map_port(confighttp::PORT_HTTPS));
@@ -78,7 +84,12 @@ namespace upnp {
         {{rtsp, rtsp, "TCP"s}, "Helios - RTSP"s},
         {{video, video, "UDP"s}, "Helios - Video"s},
         {{audio, audio, "UDP"s}, "Helios - Audio"s},
+        {{microphone, microphone, "UDP"s}, "Helios - Microphone"s},
+        {{camera, camera, "UDP"s}, "Helios - Camera"s},
         {{control, control, "UDP"s}, "Helios - Control"s},
+#ifdef HAVE_MSQUIC
+        {{quic, quic, "UDP"s}, "Helios - Moonlight OS QUIC"s},
+#endif
         {{gs_http, gs_http, "TCP"s}, "Helios - Client HTTP"s},
         {{gs_https, gs_https, "TCP"s}, "Helios - Client HTTPS"s},
       });

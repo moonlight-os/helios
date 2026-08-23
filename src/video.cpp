@@ -1175,15 +1175,23 @@ namespace video {
     std::vector<std::string> display_names;
     int display_p = -1;
     std::shared_ptr<platf::display_t> disp;
-    if (!proc::proc.display_name.empty()) {
+    auto explicit_output = capture_ctxs.front().config.output_name;
+    if (!explicit_output.empty()) {
+      disp = platf::display(encoder.platform_formats->dev_type, explicit_output, capture_ctxs.front().config);
+    } else if (!proc::proc.display_name.empty()) {
       disp = platf::display(encoder.platform_formats->dev_type, proc::proc.display_name, capture_ctxs.front().config);
+    }
+    if (!disp && !explicit_output.empty()) {
+      BOOST_LOG(error) << "Explicit topology output ["sv << explicit_output
+                       << "] is unavailable"sv;
+      return;
     }
     if (!disp) {
       // Get all the monitor names now, rather than at boot, to
       // get the most up-to-date list available monitors
-      refresh_displays(encoder.platform_formats->dev_type, display_names, display_p);
+      refresh_displays(encoder.platform_formats->dev_type, display_names, display_p, explicit_output);
       disp = platf::display(encoder.platform_formats->dev_type, display_names[display_p], capture_ctxs.front().config);
-      if (disp) {
+      if (disp && explicit_output.empty()) {
         proc::proc.display_name = display_names[display_p];
       } else {
         return;
@@ -1374,7 +1382,10 @@ namespace video {
               disp.reset();
 
               // Refresh display names since a display removal might have caused the reinitialization
-              refresh_displays(encoder.platform_formats->dev_type, display_names, display_p, proc::proc.display_name);
+              if (explicit_output.empty()) {
+                auto preferred_output = proc::proc.display_name;
+                refresh_displays(encoder.platform_formats->dev_type, display_names, display_p, preferred_output);
+              }
 
               // Process any pending display switch with the new list of displays
               if (switch_display_event->peek()) {
@@ -1382,9 +1393,12 @@ namespace video {
               }
 
               // reset_display() will sleep between retries
-              reset_display(disp, encoder.platform_formats->dev_type, display_names[display_p], capture_ctxs.front().config);
+              const auto &output = explicit_output.empty() ? display_names[display_p] : explicit_output;
+              reset_display(disp, encoder.platform_formats->dev_type, output, capture_ctxs.front().config);
               if (disp) {
-                proc::proc.display_name = display_names[display_p];
+                if (explicit_output.empty()) {
+                  proc::proc.display_name = display_names[display_p];
+                }
                 break;
               }
             }
@@ -2204,16 +2218,20 @@ namespace video {
     }
 
     while (encode_session_ctx_queue.running()) {
-      // Refresh display names since a display removal might have caused the reinitialization
-      refresh_displays(encoder.platform_formats->dev_type, display_names, display_p);
+      const auto &explicit_output = synced_session_ctxs.front()->config.output_name;
+      if (explicit_output.empty()) {
+        // Refresh display names since a display removal might have caused the reinitialization
+        refresh_displays(encoder.platform_formats->dev_type, display_names, display_p);
 
-      // Process any pending display switch with the new list of displays
-      if (switch_display_event->peek()) {
-        display_p = std::clamp(*switch_display_event->pop(), 0, (int) display_names.size() - 1);
+        // Process any pending display switch with the new list of displays
+        if (switch_display_event->peek()) {
+          display_p = std::clamp(*switch_display_event->pop(), 0, (int) display_names.size() - 1);
+        }
       }
 
-      // reset_display() will sleep between retries
-      reset_display(disp, encoder.platform_formats->dev_type, display_names[display_p], synced_session_ctxs.front()->config);
+      // Explicit topology streams never fall back to another output.
+      const auto &output = explicit_output.empty() ? display_names[display_p] : explicit_output;
+      reset_display(disp, encoder.platform_formats->dev_type, output, synced_session_ctxs.front()->config);
       if (disp) {
         break;
       }
@@ -2333,12 +2351,8 @@ namespace video {
     return encode_e::ok;
   }
 
-  void captureThreadSync() {
-    auto ref = capture_thread_sync.ref();
-
+  void captureThreadSync(encode_session_ctx_queue_t &ctx) {
     std::vector<std::unique_ptr<sync_session_ctx_t>> synced_session_ctxs;
-
-    auto &ctx = ref->encode_session_ctx_queue;
     auto lg = util::fail_guard([&]() {
       ctx.stop();
 
@@ -2364,7 +2378,8 @@ namespace video {
   void capture_async(
     safe::mail_t mail,
     config_t &config,
-    void *channel_data
+    void *channel_data,
+    capture_thread_async_ctx_t *dedicated_capture = nullptr
   ) {
     auto shutdown_event = mail->event<bool>(mail::shutdown);
 
@@ -2374,10 +2389,9 @@ namespace video {
       shutdown_event->raise(true);
     });
 
-    auto ref = capture_thread_async.ref();
-    if (!ref) {
-      return;
-    }
+    auto shared_ref = capture_thread_async.ref();
+    auto *ref = dedicated_capture != nullptr ? dedicated_capture : shared_ref.get();
+    if (ref == nullptr) return;
 
     ref->capture_ctx_queue->raise(capture_ctx_t {images, config});
 
@@ -2454,11 +2468,27 @@ namespace video {
 
     idr_events->raise(true);
     if (chosen_encoder->flags & PARALLEL_ENCODING) {
-      capture_async(std::move(mail), config, channel_data);
+      if (config.output_name.empty()) {
+        capture_async(std::move(mail), config, channel_data);
+      } else {
+        capture_thread_async_ctx_t dedicated_capture;
+        if (start_capture_async(dedicated_capture) == 0) {
+          capture_async(std::move(mail), config, channel_data, &dedicated_capture);
+          end_capture_async(dedicated_capture);
+        }
+      }
     } else {
       safe::signal_t join_event;
-      auto ref = capture_thread_sync.ref();
-      ref->encode_session_ctx_queue.raise(sync_session_ctx_t {
+      auto shared_ref = capture_thread_sync.ref();
+      capture_thread_sync_ctx_t dedicated_capture;
+      auto *capture_owner = config.output_name.empty() ? shared_ref.get() : &dedicated_capture;
+      std::thread dedicated_thread;
+      if (!config.output_name.empty()) {
+        dedicated_thread = std::thread {[&dedicated_capture] {
+          captureThreadSync(dedicated_capture.encode_session_ctx_queue);
+        }};
+      }
+      capture_owner->encode_session_ctx_queue.raise(sync_session_ctx_t {
         &join_event,
         mail->event<bool>(mail::shutdown),
         mail::man->queue<packet_t>(mail::video_packets),
@@ -2472,6 +2502,10 @@ namespace video {
 
       // Wait for join signal
       join_event.view();
+      if (dedicated_thread.joinable()) {
+        dedicated_capture.encode_session_ctx_queue.stop();
+        dedicated_thread.join();
+      }
     }
   }
 
@@ -3013,7 +3047,7 @@ namespace video {
   }
 
   int start_capture_sync(capture_thread_sync_ctx_t &ctx) {
-    std::thread {&captureThreadSync}.detach();
+    std::thread {&captureThreadSync, std::ref(ctx.encode_session_ctx_queue)}.detach();
     return 0;
   }
 

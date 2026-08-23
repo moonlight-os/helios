@@ -46,7 +46,11 @@ docs/doxyconfig*
 
 # npm
 node_modules/
-package-lock.json
+
+# Local test/runtime state
+/sunshine_state.json
+/test_helios.log*
+/write_file_test_*.txt
 
 # Translations
 *.mo

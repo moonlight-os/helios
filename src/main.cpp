@@ -18,8 +18,11 @@
 #include "main.h"
 #include "nvhttp.h"
 #include "process.h"
+#include "quic_transport.h"
 #include "system_tray.h"
 #include "upnp.h"
+#include "usb_compat.h"
+#include "usb_backend.h"
 #include "uuid.h"
 #include "video.h"
 
@@ -62,6 +65,10 @@ std::map<std::string_view, std::function<int(const char *name, int argc, char **
 #ifdef _WIN32
   {"restore-nvprefs-undo"sv, [](const char *name, int argc, char **argv) {
      return args::restore_nvprefs_undo();
+   }},
+#else
+  {"usb-helper"sv, [](const char *name, int argc, char **argv) {
+     return stream::run_usb_helper();
    }},
 #endif
 };
@@ -409,6 +416,7 @@ int main(int argc, char *argv[]) {
 
     return -1;
   }
+  auto usb_compat_deinit_guard = usb_compat::start();
 
   std::unique_ptr<platf::deinit_t> mDNS;
   auto sync_mDNS = std::async(std::launch::async, [&mDNS]() {
@@ -426,6 +434,17 @@ int main(int argc, char *argv[]) {
   if (shutdown_event->peek()) {
     return lifetime::desired_exit_code;
   }
+
+#ifdef HAVE_MSQUIC
+  if (quic_transport::start_server(config::nvhttp.cert, config::nvhttp.pkey,
+                                   net::map_port(quic_transport::PORT),
+                                   static_cast<std::uint16_t>(config::helios.port))) {
+    BOOST_LOG(info) << "Moonlight OS QUIC listening on UDP "sv
+                    << net::map_port(quic_transport::PORT);
+  } else {
+    BOOST_LOG(warning) << "Moonlight OS QUIC failed to initialize; using vanilla transports"sv;
+  }
+#endif
 
   std::thread httpThread {nvhttp::start};
   std::thread configThread {confighttp::start};
@@ -457,6 +476,8 @@ int main(int argc, char *argv[]) {
 
   // Wait for shutdown, this is not necessary when we're using the main event loop
   shutdown_event->view();
+
+  quic_transport::stop_server();
 
   httpThread.join();
   configThread.join();
