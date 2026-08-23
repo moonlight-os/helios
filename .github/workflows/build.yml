@@ -371,12 +371,13 @@ jobs:
           if [[ "$tag" != v* ]]; then tag=v0.0.0; fi
           commit="$(git rev-parse HEAD)"
           git_version="$(git describe --long --tags --abbrev=7 | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g')"
-          packaging/aur/render.sh \
-            "$tag" "$commit" \
-            0000000000000000000000000000000000000000000000000000000000000000 \
-            "$git_version" "$RUNNER_TEMP/aur"
           mkdir -p "$GITHUB_WORKSPACE/arch-artifacts"
-          chown -R builder:builder "$GITHUB_WORKSPACE" "$RUNNER_TEMP/aur"
+          chown -R builder:builder "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
+          sudo -u builder \
+            "$GITHUB_WORKSPACE/packaging/aur/render.sh" \
+              "$tag" "$commit" \
+              0000000000000000000000000000000000000000000000000000000000000000 \
+              "$git_version" "$RUNNER_TEMP/aur"
           sudo -u builder env \
             PKGDEST="$GITHUB_WORKSPACE/arch-artifacts" \
             _run_unit_tests=true \
