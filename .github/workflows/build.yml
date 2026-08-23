@@ -40,7 +40,7 @@ jobs:
             gcc: 14
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Helios consumes the shared protocol library (moonlight-os/lunaris)
           # as a submodule and builds the bundled ENet out of it, so a checkout
@@ -101,7 +101,7 @@ jobs:
 
       - name: Upload the binary
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: helios-${{ matrix.os }}
           path: build/helios
@@ -135,7 +135,7 @@ jobs:
       BRANCH: ${{ github.ref_name }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Same two reasons as the Linux job: lunaris is a submodule, and
           # cmake/prep/build_version.cmake shells out to git describe.
@@ -149,7 +149,7 @@ jobs:
       # It has to come before setup-msys2 so node.exe is on the PATH the
       # MSYS2 shell inherits.
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
 
@@ -258,7 +258,7 @@ jobs:
 
       - name: Upload the binary
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: helios-${{ matrix.os }}
           path: build/helios.exe
@@ -266,7 +266,7 @@ jobs:
           retention-days: 7
 
       - name: Upload the installer
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: helios-${{ matrix.os }}-installer
           path: build/cpack_artifacts/*.exe
@@ -274,7 +274,7 @@ jobs:
           retention-days: 7
 
       - name: Upload the updater archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: helios-${{ matrix.os }}-updater
           path: build/helios-windows-x86_64.zip
@@ -288,13 +288,14 @@ jobs:
     steps:
       - name: Install validators
         run: pacman -Syu --noconfirm --needed git ruby shellcheck
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Validate renderers and generated metadata
         run: |
           set -euo pipefail
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           shellcheck packaging/aur/render.sh packaging/nix/update.sh packaging/winget/render.sh
           commit="$(git rev-parse HEAD)"
           git_version="$(git describe --long --tags --abbrev=7 | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g')"
@@ -315,14 +316,17 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: cachix/install-nix-action@v31
         with:
           github_access_token: ${{ github.token }}
       - name: Check Nix formatting
         run: nix run nixpkgs#nixfmt -- --check packaging/nix/*.nix
       - name: Build the NUR package
-        run: nix-build packaging/nix/nur.nix -A helios --no-out-link
+        run: |
+          nixpkgs_path="$(nix eval --raw nixpkgs#path)"
+          nix-build -I "nixpkgs=$nixpkgs_path" \
+            packaging/nix/nur.nix -A helios --no-out-link
 
   build-arch-package:
     name: Arch package
@@ -341,7 +345,7 @@ jobs:
             libnotify libpulse libva libx11 libxcb libxfixes libxrandr libxtst \
             miniupnpc numactl open-iscsi openssl opus usbip wayland which
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -358,6 +362,7 @@ jobs:
       - name: Render and build the Helios package
         run: |
           set -euo pipefail
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           tag="$GITHUB_REF_NAME"
           if [[ "$tag" != v* ]]; then tag=v0.0.0; fi
           commit="$(git rev-parse HEAD)"
@@ -376,7 +381,7 @@ jobs:
           namcap "$GITHUB_WORKSPACE"/arch-artifacts/*.pkg.tar.zst
 
       - name: Upload Arch package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: helios-arch-x86_64
           path: arch-artifacts/*.pkg.tar.zst
@@ -393,19 +398,19 @@ jobs:
 
     steps:
       - name: Download updater archive
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: helios-windows-2025-updater
           path: updater
 
       - name: Download installer
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: helios-windows-2025-installer
           path: installer
 
       - name: Download Arch package
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: helios-arch-x86_64
           path: arch
@@ -474,10 +479,10 @@ jobs:
     steps:
       - name: Install publishing tools
         run: pacman -Syu --noconfirm --needed git openssh
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: helios-arch-x86_64
           path: arch
@@ -520,8 +525,8 @@ jobs:
     needs: release
     runs-on: windows-2025
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           name: helios-windows-2025-installer
           path: installer
@@ -555,7 +560,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: main
@@ -565,7 +570,9 @@ jobs:
       - name: Update and validate fixed-output hashes
         run: |
           packaging/nix/update.sh "$GITHUB_REF_NAME"
-          nix-build packaging/nix/nur.nix -A helios --no-out-link
+          nixpkgs_path="$(nix eval --raw nixpkgs#path)"
+          nix-build -I "nixpkgs=$nixpkgs_path" \
+            packaging/nix/nur.nix -A helios --no-out-link
       - name: Commit the NUR release metadata
         run: |
           set -euo pipefail
