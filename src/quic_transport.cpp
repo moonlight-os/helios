@@ -22,9 +22,12 @@
 #ifdef HAVE_MSQUIC
 #include <boost/asio.hpp>
 #include "MlosQuicWire.h"
+#include "logging.h"
 #include "msquic.h"
 #include "rtsp.h"
 #endif
+
+using namespace std::literals;
 
 namespace quic_transport {
   bool requested(std::string_view value) {
@@ -303,8 +306,19 @@ namespace quic_transport {
           break;
         }
         case QUIC_CONNECTION_EVENT_CONNECTED:
+          BOOST_LOG(::debug) << "Moonlight OS QUIC: client connected"sv;
           state->server->api->ConnectionSendResumptionTicket(
             connection, QUIC_SEND_RESUMPTION_FLAG_NONE, 0, nullptr);
+          break;
+        case QUIC_CONNECTION_EVENT_SHUTDOWN_INITIATED_BY_TRANSPORT:
+          BOOST_LOG(::debug) << "Moonlight OS QUIC: transport shutdown [status: "sv
+                             << event->SHUTDOWN_INITIATED_BY_TRANSPORT.Status
+                             << ", error: "sv
+                             << event->SHUTDOWN_INITIATED_BY_TRANSPORT.ErrorCode << ']';
+          break;
+        case QUIC_CONNECTION_EVENT_SHUTDOWN_INITIATED_BY_PEER:
+          BOOST_LOG(::debug) << "Moonlight OS QUIC: peer shutdown [error: "sv
+                          << event->SHUTDOWN_INITIATED_BY_PEER.ErrorCode << ']';
           break;
         case QUIC_CONNECTION_EVENT_PEER_STREAM_STARTED: {
           const auto ordinal = state->next_stream_ordinal.fetch_add(1);
@@ -338,6 +352,7 @@ namespace quic_transport {
           }
           break;
         case QUIC_CONNECTION_EVENT_SHUTDOWN_COMPLETE:
+          BOOST_LOG(::debug) << "Moonlight OS QUIC: connection shutdown complete"sv;
           state->stop();
           state->server->remove(state);
           if (!event->SHUTDOWN_COMPLETE.AppCloseInProgress) state->server->api->ConnectionClose(connection);
@@ -435,20 +450,28 @@ namespace quic_transport {
       const auto local_port = tcp_socket->local_endpoint(error).port();
       if (error || !rtsp_stream::register_quic_rtsp_proxy(
                      local_port, connection->launch_session_id)) {
+        BOOST_LOG(::error) << "Moonlight OS QUIC: could not register RTSP proxy for launch ["sv
+                         << connection->launch_session_id << ']';
         return false;
       }
       tcp_socket->connect(tcp::endpoint(boost::asio::ip::address_v4::loopback(),
                                        connection->server->base_port + 21), error);
       if (error) {
         rtsp_stream::unregister_quic_rtsp_proxy(local_port);
+        BOOST_LOG(::error) << "Moonlight OS QUIC: could not connect RTSP proxy ["sv
+                         << error.message() << ']';
         return false;
       }
+      BOOST_LOG(::debug) << "Moonlight OS QUIC: RTSP stream connected through local port ["sv
+                      << local_port << "] for launch ["sv
+                      << connection->launch_session_id << ']';
       tcp_reader = std::thread([this] {
         std::array<std::uint8_t, 16384> bytes {};
         while (!stopping) {
           boost::system::error_code error;
           const auto size = tcp_socket->read_some(boost::asio::buffer(bytes), error);
           if (size && !send_quic(bytes.data(), size)) {
+            BOOST_LOG(::error) << "Moonlight OS QUIC: could not forward RTSP response"sv;
             connection->shutdown(APP_ERROR_PROTOCOL);
             break;
           }
@@ -485,7 +508,11 @@ namespace quic_transport {
         prefix.clear();
         if (!connection->claim_stream_channel(ordinal, channel)) return false;
         if (channel == MLOS_QUIC_STREAM_RTSP) {
-          if (!connection->authenticated || !start_rtsp()) return false;
+          if (!connection->authenticated || !start_rtsp()) {
+            BOOST_LOG(::error) << "Moonlight OS QUIC: rejected RTSP stream [ordinal: "sv
+                             << ordinal << ']';
+            return false;
+          }
         } else if (channel != MLOS_QUIC_STREAM_AUTH || connection->authenticated) {
           return false;
         }
@@ -503,9 +530,14 @@ namespace quic_transport {
       }
       if (channel == MLOS_QUIC_STREAM_RTSP && offset < incoming.size()) {
         boost::system::error_code error;
-        return boost::asio::write(*tcp_socket,
+        const auto forwarded = boost::asio::write(*tcp_socket,
           boost::asio::buffer(incoming.data() + offset, incoming.size() - offset), error) ==
           incoming.size() - offset && !error;
+        if (!forwarded) {
+          BOOST_LOG(::error) << "Moonlight OS QUIC: could not forward RTSP request ["sv
+                           << error.message() << ']';
+        }
+        return forwarded;
       }
       return true;
     }
@@ -556,6 +588,8 @@ namespace quic_transport {
       if (!ticket) return false;
       launch_session_id = ticket->launch_session_id;
       authenticated = true;
+      BOOST_LOG(::debug) << "Moonlight OS QUIC: authenticated launch ["sv
+                      << launch_session_id << ']';
       start_udp();
       return true;
     }

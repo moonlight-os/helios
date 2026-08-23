@@ -471,6 +471,10 @@ namespace rtsp_stream {
 
       auto launch_session = claim_pending_session(launch_session_id);
       if (launch_session) {
+        if (launch_session_id) {
+          BOOST_LOG(debug) << "Moonlight OS QUIC: accepted local RTSP proxy for launch ["sv
+                          << *launch_session_id << ']';
+        }
         // Associate the current RTSP session with this socket and start reading
         socket->session = launch_session;
         socket->read();
@@ -731,6 +735,14 @@ namespace rtsp_stream {
       }
       if (selected == _pending_sessions.end()) {
         return nullptr;
+      }
+      if (launch_session_id) {
+        // QUIC authenticates every short-lived RTSP proxy against one launch
+        // ticket. Keep that launch state until the handshake finishes so the
+        // subsequent SETUP, ANNOUNCE, and PLAY streams can claim the same
+        // session, matching the legacy launch-event behaviour.
+        selected->second.expires = now + config::stream.ping_timeout;
+        return selected->second.session;
       }
       auto session = std::move(selected->second.session);
       _pending_sessions.erase(selected);
