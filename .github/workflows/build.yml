@@ -484,7 +484,9 @@ jobs:
     container: archlinux:base-devel
     steps:
       - name: Install publishing tools
-        run: pacman -Syu --noconfirm --needed git openssh
+        run: |
+          pacman -Syu --noconfirm --needed git openssh sudo
+          useradd --create-home builder
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -500,8 +502,12 @@ jobs:
           binary_sha256="$(sha256sum "${package[0]}" | cut -d' ' -f1)"
           commit="$(git rev-parse "$GITHUB_SHA^{commit}")"
           git_version="$(git describe --long --tags --abbrev=7 "$commit" | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g')"
-          packaging/aur/render.sh \
-            "$GITHUB_REF_NAME" "$commit" "$binary_sha256" "$git_version" aur
+          mkdir -p aur
+          chown builder:builder aur
+          sudo -u builder \
+            "$GITHUB_WORKSPACE/packaging/aur/render.sh" \
+              "$GITHUB_REF_NAME" "$commit" "$binary_sha256" "$git_version" \
+              "$GITHUB_WORKSPACE/aur"
       - name: Push AUR repositories
         env:
           AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}

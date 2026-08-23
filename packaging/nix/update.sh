@@ -11,13 +11,14 @@ version="${tag#v}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 package="$root/packaging/nix/package.nix"
 
-source_json="$(nix run nixpkgs#nix-prefetch-github -- moonlight-os helios --rev "$tag" --fetch-submodules)"
+source_json="$(nix shell nixpkgs#nix-prefetch-github nixpkgs#nix-prefetch-git \
+  -c nix-prefetch-github moonlight-os helios --rev "$tag" --fetch-submodules)"
 source_hash="$(jq -r .hash <<<"$source_json")"
 npm_hash="$(nix run nixpkgs#prefetch-npm-deps -- "$root/package-lock.json")"
 
 sed -i -E \
   -e "s/version = \"[^\"]+\";/version = \"$version\";/" \
-  -e "0,/hash = \"sha256-[^\"]+\";/s//hash = \"$source_hash\";/" \
+  -e "/src = fetchFromGitHub \{/,/^  \};/s#hash = \"sha256-[^\"]+\";#hash = \"$source_hash\";#" \
   -e "s#npmDepsHash = \"sha256-[^\"]+\";#npmDepsHash = \"$npm_hash\";#" \
   "$package"
 
