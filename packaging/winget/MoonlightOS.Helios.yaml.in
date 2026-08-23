@@ -1,0 +1,6 @@
+# Created with Helios's release tooling. Do not edit generated manifests.
+PackageIdentifier: MoonlightOS.Helios
+PackageVersion: @VERSION@
+DefaultLocale: en-US
+ManifestType: version
+ManifestVersion: 1.10.0
