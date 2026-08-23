@@ -12,6 +12,7 @@
 #include <opus/opus.h>
 
 #include "../../src/stream.h"
+#include "../../src/network.h"
 #include "../../src/quic_transport.h"
 #include "../../src/usb_backend.h"
 #include "../../src/usb_compat.h"
@@ -865,6 +866,28 @@ TEST(QuicNegotiationTests, AcceptsOnlyCanonicalOptInAndToken) {
   EXPECT_EQ(quic_transport::session_url("[::1]", 48003, token),
             "quic://[::1]:48003/" + encoded);
 }
+
+#ifdef HAVE_MSQUIC
+TEST(QuicNegotiationTests, AllowsAuthenticatedSequentialRtspStreams) {
+  EXPECT_TRUE(quic_transport::may_claim_stream_channel(
+    0, MLOS_QUIC_STREAM_AUTH, false, false));
+  EXPECT_FALSE(quic_transport::may_claim_stream_channel(
+    1, MLOS_QUIC_STREAM_AUTH, true, true));
+  EXPECT_FALSE(quic_transport::may_claim_stream_channel(
+    1, MLOS_QUIC_STREAM_RTSP, false, false));
+  EXPECT_TRUE(quic_transport::may_claim_stream_channel(
+    1, MLOS_QUIC_STREAM_RTSP, true, true));
+  EXPECT_TRUE(quic_transport::may_claim_stream_channel(
+    2, MLOS_QUIC_STREAM_RTSP, true, true));
+  EXPECT_FALSE(quic_transport::may_claim_stream_channel(
+    2, MLOS_QUIC_STREAM_CONTROL, true, true));
+}
+
+TEST(QuicNegotiationTests, RecognizesMappedLoopbackProxyAddress) {
+  const auto mapped = boost::asio::ip::make_address("::ffff:127.0.0.1");
+  EXPECT_TRUE(net::normalize_address(mapped).is_loopback());
+}
+#endif
 
 TEST(QuicNegotiationTests, TicketAuthorizationIsBoundToTokenAndCertificate) {
   quic_transport::ticket_t ticket {};

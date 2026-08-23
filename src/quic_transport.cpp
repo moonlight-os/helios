@@ -96,6 +96,22 @@ namespace quic_transport {
                          ticket.client_certificate_sha256.size()) == 0;
   }
 
+#ifdef HAVE_MSQUIC
+  bool may_claim_stream_channel(std::uint64_t ordinal, std::uint8_t channel,
+                                bool auth_stream_claimed, bool authenticated) {
+    if (channel == MLOS_QUIC_STREAM_AUTH) {
+      return ordinal == 0 && !auth_stream_claimed && !authenticated;
+    }
+    if (channel == MLOS_QUIC_STREAM_RTSP) {
+      // Moonlight-common uses a new TCP connection for each RTSP request. The
+      // QUIC bridge mirrors that with a new stream for every request, so only
+      // authentication is singleton; sequential RTSP streams are expected.
+      return ordinal > 0 && auth_stream_claimed && authenticated;
+    }
+    return false;
+  }
+#endif
+
   ticket_registry_t::ticket_registry_t(std::chrono::seconds lifetime): lifetime_(lifetime) {
   }
 
@@ -198,7 +214,6 @@ namespace quic_transport {
       std::atomic_uint64_t next_stream_ordinal {0};
       std::mutex stream_channels_mutex;
       bool auth_stream_claimed = false;
-      bool rtsp_stream_claimed = false;
       crypto::sha256_t peer_certificate_sha256 {};
       std::uint32_t launch_session_id = 0;
       std::array<std::unique_ptr<udp_bridge_t>, MLOS_QUIC_DATAGRAM_CAMERA + 1> udp;
@@ -547,17 +562,13 @@ namespace quic_transport {
 
     bool connection_t::claim_stream_channel(std::uint64_t ordinal, std::uint8_t channel) {
       std::lock_guard lock(stream_channels_mutex);
+      if (!may_claim_stream_channel(ordinal, channel, auth_stream_claimed, authenticated)) {
+        return false;
+      }
       if (channel == MLOS_QUIC_STREAM_AUTH) {
-        if (ordinal != 0 || auth_stream_claimed || authenticated) return false;
         auth_stream_claimed = true;
-        return true;
       }
-      if (channel == MLOS_QUIC_STREAM_RTSP) {
-        if (!authenticated || !auth_stream_claimed || rtsp_stream_claimed) return false;
-        rtsp_stream_claimed = true;
-        return true;
-      }
-      return false;
+      return true;
     }
 
     void connection_t::start_udp() {
@@ -606,7 +617,10 @@ namespace quic_transport {
       settings.IsSet.IdleTimeoutMs = TRUE;
       settings.KeepAliveIntervalMs = 1000;
       settings.IsSet.KeepAliveIntervalMs = TRUE;
-      settings.PeerBidiStreamCount = 8;
+      // RTSP uses several short-lived request streams during one handshake.
+      // Leave enough credit for those streams to overlap while their graceful
+      // shutdown callbacks are still being delivered.
+      settings.PeerBidiStreamCount = 32;
       settings.IsSet.PeerBidiStreamCount = TRUE;
       settings.DatagramReceiveEnabled = TRUE;
       settings.IsSet.DatagramReceiveEnabled = TRUE;

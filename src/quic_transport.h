@@ -37,6 +37,10 @@ namespace quic_transport {
                                        std::uint32_t launch_session_id);
   bool authorize(const ticket_t& ticket, const token_t& token,
                  const crypto::sha256_t& client_certificate_sha256);
+#ifdef HAVE_MSQUIC
+  bool may_claim_stream_channel(std::uint64_t ordinal, std::uint8_t channel,
+                                bool auth_stream_claimed, bool authenticated);
+#endif
 
   class ticket_registry_t {
   public:

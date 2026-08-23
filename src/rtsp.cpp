@@ -465,7 +465,7 @@ namespace rtsp_stream {
       std::optional<uint32_t> launch_session_id;
       boost::system::error_code endpoint_ec;
       const auto endpoint = socket->sock.remote_endpoint(endpoint_ec);
-      if (!endpoint_ec && endpoint.address().is_loopback()) {
+      if (!endpoint_ec && net::normalize_address(endpoint.address()).is_loopback()) {
         launch_session_id = take_quic_proxy(endpoint.port());
       }
 
