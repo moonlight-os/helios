@@ -158,30 +158,49 @@ namespace {
         return false;
       }
       const auto original_port = QuicAddrGetPort(&address);
-      QuicAddrSetPort(&address, 0);
+      // The preceding bidirectional datagrams have reached the applications,
+      // but MsQuic can still be completing their send-path bookkeeping. Its
+      // own NAT-rebinding interop test quiesces the path before SetParam; doing
+      // the same avoids replacing a binding still referenced by SocketSend.
+      std::this_thread::sleep_for(250ms);
       migrated_ = false;
       migration_requested_ = true;
-      if (QUIC_FAILED(api_->SetParam(connection_, QUIC_PARAM_CONN_LOCAL_ADDRESS,
-                                    sizeof(address), &address))) {
+      QUIC_STATUS migration_status = QUIC_STATUS_ADDRESS_IN_USE;
+      // Use an explicit replacement port, matching MsQuic's own NAT rebinding
+      // interop test. Passing port zero here asks the Linux datapath to replace
+      // its binding while a path-validation send may still reference it, which
+      // causes MsQuic 2.x to bugcheck in SocketSend under load.
+      for (std::uint16_t offset = 1236;
+           offset <= 1246 && QUIC_FAILED(migration_status); ++offset) {
+        auto candidate = static_cast<std::uint16_t>(original_port + offset);
+        if (candidate == 0 || candidate == original_port) continue;
+        QuicAddrSetPort(&address, candidate);
+        migration_status = api_->SetParam(connection_, QUIC_PARAM_CONN_LOCAL_ADDRESS,
+                                          sizeof(address), &address);
+      }
+      if (QUIC_FAILED(migration_status)) {
         migration_requested_ = false;
         return false;
       }
-      const auto deadline = std::chrono::steady_clock::now() + 10s;
-      while (!failed_.load() && !finished_.load() &&
-             std::chrono::steady_clock::now() < deadline) {
-        QUIC_ADDR migrated_address {};
-        std::uint32_t migrated_address_size = sizeof(migrated_address);
-        if (QUIC_SUCCEEDED(api_->GetParam(connection_, QUIC_PARAM_CONN_LOCAL_ADDRESS,
-                                         &migrated_address_size, &migrated_address)) &&
-            QuicAddrGetPort(&migrated_address) != 0 &&
-            QuicAddrGetPort(&migrated_address) != original_port) {
-          migrated_ = true;
-          break;
-        }
-        std::this_thread::sleep_for(2ms);
+      // MsQuic may not emit LOCAL_ADDRESS_CHANGED until traffic exercises the
+      // new path. Give its path-validation send the same settling interval as
+      // the upstream interop test, then query the result once (polling GetParam
+      // during the switch races the Linux datapath in MsQuic 2.x).
+      {
+        std::unique_lock lock(mutex_);
+        changed_.wait_for(lock, 250ms, [this] {
+          return migrated_.load() || failed_.load() || finished_.load();
+        });
       }
+      QUIC_ADDR migrated_address {};
+      std::uint32_t migrated_address_size = sizeof(migrated_address);
+      const auto changed = !failed_.load() && !finished_.load() &&
+        QUIC_SUCCEEDED(api_->GetParam(connection_, QUIC_PARAM_CONN_LOCAL_ADDRESS,
+                                     &migrated_address_size, &migrated_address)) &&
+        QuicAddrGetPort(&migrated_address) != 0 &&
+        QuicAddrGetPort(&migrated_address) != original_port;
       migration_requested_ = false;
-      return migrated_.load();
+      return changed;
     }
 
     void stop() {
