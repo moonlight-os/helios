@@ -340,8 +340,6 @@ int main(int argc, char *argv[]) {
   SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
 #endif
 
-  proc::refresh(config::stream.file_apps);
-
   // If any of the following fail, we log an error and continue event though helios will not function correctly.
   // This allows access to the UI to fix configuration problems or view the logs.
 
@@ -349,6 +347,16 @@ int main(int argc, char *argv[]) {
   if (!platf_deinit_guard) {
     BOOST_LOG(error) << "Platform failed to initialize"sv;
   }
+
+#ifdef __linux__
+  // Prepare an isolated headless compositor before application definitions
+  // capture their launch environment. Existing Sway sessions are reused;
+  // other desktops keep running untouched while streamed apps use the private
+  // Wayland display.
+  (void) platf::virtual_display_topology_available();
+#endif
+
+  proc::refresh(config::stream.file_apps);
 
   auto proc_deinit_guard = proc::init();
   if (!proc_deinit_guard) {

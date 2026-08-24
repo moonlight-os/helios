@@ -308,6 +308,16 @@ jobs:
               v0.0.0 "$commit" \
               0000000000000000000000000000000000000000000000000000000000000000 \
               "$git_version" "$RUNNER_TEMP/aur"
+          mkdir -p "$RUNNER_TEMP/aur-beta"
+          chown builder:builder "$RUNNER_TEMP/aur-beta"
+          sudo -u builder \
+            "$GITHUB_WORKSPACE/packaging/aur/render.sh" \
+              v0.6.0-beta.1 "$commit" \
+              0000000000000000000000000000000000000000000000000000000000000000 \
+              "$git_version" "$RUNNER_TEMP/aur-beta"
+          grep -qx 'pkgver=0.6.0beta1' "$RUNNER_TEMP/aur-beta/helios/PKGBUILD"
+          grep -q '/releases/download/v0.6.0-beta.1/' \
+            "$RUNNER_TEMP/aur-beta/helios-bin/PKGBUILD"
           packaging/winget/render.sh \
             v0.0.0 \
             0000000000000000000000000000000000000000000000000000000000000000 \
@@ -478,7 +488,7 @@ jobs:
 
   publish-aur:
     name: Publish AUR packages
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
     needs: release
     runs-on: ubuntu-24.04
     container: archlinux:base-devel
@@ -533,7 +543,7 @@ jobs:
 
   publish-winget:
     name: Submit Winget manifest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
     needs: release
     runs-on: windows-2025
     steps:
@@ -566,7 +576,7 @@ jobs:
 
   update-nur:
     name: Update NUR package
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
     needs: release
     runs-on: ubuntu-24.04
     permissions:
