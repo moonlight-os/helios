@@ -20,6 +20,7 @@
 #include "process.h"
 #include "quic_transport.h"
 #include "system_tray.h"
+#include "telemetry.h"
 #include "upnp.h"
 #include "usb_compat.h"
 #include "usb_backend.h"
@@ -424,6 +425,7 @@ int main(int argc, char *argv[]) {
 
     return -1;
   }
+  auto telemetry_deinit_guard = telemetry::start();
   auto usb_compat_deinit_guard = usb_compat::start();
 
   std::unique_ptr<platf::deinit_t> mDNS;

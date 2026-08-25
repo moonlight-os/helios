@@ -283,6 +283,8 @@ namespace config {
 
     std::string log_file;
     bool notify_pre_releases;
+    bool telemetry_enabled;
+    bool crash_reporting_enabled;
     bool legacy_ordering;
     bool system_tray;
     std::vector<prep_cmd_t> prep_cmds;

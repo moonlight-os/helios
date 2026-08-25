@@ -290,6 +290,54 @@ host state behind.
     </tr>
 </table>
 
+### telemetry_enabled
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Send the Helios version, operating system, and CPU architecture at
+            most once per UTC day. No device identifier is sent.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            enabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            telemetry_enabled = disabled
+            @endcode</td>
+    </tr>
+</table>
+
+### crash_reporting_enabled
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            Report an unclean exit on the next launch. Memory dumps, logs,
+            paths, and device identifiers are never uploaded.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">@code{}
+            enabled
+            @endcode</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            crash_reporting_enabled = disabled
+            @endcode</td>
+    </tr>
+</table>
+
 ### hide_tray_controls
 
 Hide interactive controls from the tray menu while leaving the status icon

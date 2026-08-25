@@ -213,6 +213,10 @@ onMounted(() => {
       <Checkbox id="notify_pre_releases" locale-prefix="config" v-model="config.notify_pre_releases" default="false"></Checkbox>
       <!-- Enable system tray -->
       <Checkbox id="system_tray" locale-prefix="config" v-model="config.system_tray" default="true"></Checkbox>
+      <!-- Anonymous telemetry -->
+      <Checkbox id="telemetry_enabled" locale-prefix="config" v-model="config.telemetry_enabled" default="true"></Checkbox>
+      <!-- Anonymous crash reporting -->
+      <Checkbox id="crash_reporting_enabled" locale-prefix="config" v-model="config.crash_reporting_enabled" default="true"></Checkbox>
       <!-- Hide Tray Controls -->
       <Checkbox id="hide_tray_controls" locale-prefix="config" v-model="config.hide_tray_controls" default="false"></Checkbox>
     </div>
