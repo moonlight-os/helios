@@ -5,6 +5,7 @@
 // standard includes
 #include <codecvt>
 #include <csignal>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 
@@ -39,6 +40,32 @@ extern "C" {
 }
 
 using namespace std::literals;
+
+#ifdef _WIN32
+namespace {
+  bool set_working_directory_to_executable() {
+    std::wstring executable_path(32768, L'\0');
+    const auto length = GetModuleFileNameW(
+      nullptr,
+      executable_path.data(),
+      static_cast<DWORD>(executable_path.size())
+    );
+    if (length == 0 || length >= executable_path.size()) {
+      std::cerr << "Failed to determine the Helios executable directory: " << GetLastError() << std::endl;
+      return false;
+    }
+
+    executable_path.resize(length);
+    const auto executable_directory = std::filesystem::path {executable_path}.parent_path();
+    if (!SetCurrentDirectoryW(executable_directory.c_str())) {
+      std::cerr << "Failed to use the Helios executable directory: " << GetLastError() << std::endl;
+      return false;
+    }
+
+    return true;
+  }
+}  // namespace
+#endif
 
 std::map<int, std::function<void()>> signal_handlers;
 
@@ -152,6 +179,13 @@ int main(int argc, char *argv[]) {
   // Avoid searching the PATH in case a user has configured their system insecurely
   // by placing a user-writable directory in the system-wide PATH variable.
   SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_APPLICATION_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
+
+  // Packaged Windows assets use paths relative to helios.exe. Service and
+  // Start Menu launches already start in the install directory, but direct
+  // invocations from PATH inherit the caller's working directory.
+  if (!set_working_directory_to_executable()) {
+    return 1;
+  }
 
   setlocale(LC_ALL, "C");
 #endif
